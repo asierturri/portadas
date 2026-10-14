@@ -1,12 +1,68 @@
-import { mountBook } from "./book.js?v=pages2";
+import { mountBook } from "./book.js?v=pages11";
+import {
+  drawTemplateBack,
+  drawTemplateFront,
+  drawTemplateSpine,
+  loadEditionDefinitions,
+} from "./edition-templates.js";
+
+const DRAFT_DB = "portadas-editor";
+const DRAFT_STORE = "drafts";
+const DRAFT_KEY = "current";
+
+function openDraftDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("IndexedDB is unavailable"));
+      return;
+    }
+    const request = window.indexedDB.open(DRAFT_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(DRAFT_STORE);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readPersistedDraft() {
+  try {
+    const db = await openDraftDb();
+    const draft = await new Promise((resolve, reject) => {
+      const request = db.transaction(DRAFT_STORE, "readonly").objectStore(DRAFT_STORE).get(DRAFT_KEY);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return draft;
+  } catch (error) {
+    console.warn("Could not load the saved cover draft.", error);
+    return null;
+  }
+}
+
+const editionDefinitions = await loadEditionDefinitions();
+const editionById = new Map(editionDefinitions.map((definition) => [definition.id, definition]));
+const persistedDraft = await readPersistedDraft();
+const defaultTemplateOptions = Object.fromEntries(editionDefinitions
+  .filter((definition) => definition.kind === "template")
+  .map((definition) => [definition.id, Object.fromEntries(
+    (definition.front.controls || []).map((control) => [control.id, control.default])
+  )]));
 
 const canvas = document.querySelector("#cover");
 const ctx = canvas.getContext("2d");
+const surfacePreview = document.querySelector("#surface-preview");
+const previewSwitcher = document.querySelector("#preview-switcher");
 const authorInput = document.querySelector("#author");
 const titleInput = document.querySelector("#title");
 const photoInput = document.querySelector("#photo");
 const zoomInput = document.querySelector("#zoom");
+const panXInput = document.querySelector("#pan-x");
+const panYInput = document.querySelector("#pan-y");
 const pagesInput = document.querySelector("#pages");
+const pagesSlider = document.querySelector("#pages-slider");
+const backQuoteInput = document.querySelector("#back-quote");
+const backCopyInput = document.querySelector("#back-copy");
+const templateBackCopyInput = document.querySelector("#template-back-copy");
 const view = document.querySelector("#book-view");
 
 const W = 1600;
@@ -16,17 +72,32 @@ const state = {
   author: authorInput.value,
   title: titleInput.value,
   image: null,
+  authorImage: null,
   zoom: 1,
   panX: 0,
   panY: 0,
   position: "top",
   scheme: "white",
-  edition: "alianza",
+  edition: editionDefinitions[0]?.id || "alianza",
   series: "contemporanea",
   authorColor: "#111111",
   titleColor: "#e23b4a",
   pages: Number(pagesInput.value) || 320,
+  backQuote: backQuoteInput.value,
+  backCopy: backCopyInput.value,
+  templateOptions: { ...(defaultTemplateOptions[editionDefinitions[0]?.id] || {}) },
+  ...(persistedDraft?.settings || {}),
+  image: null,
+  authorImage: null,
+  imageUrl: null,
+  authorImageUrl: null,
+  imageBlob: persistedDraft?.coverImage || null,
+  authorImageBlob: persistedDraft?.authorImage || null,
+  imageName: persistedDraft?.coverImageName || "",
+  authorImageName: persistedDraft?.authorImageName || "",
 };
+if (!editionById.has(state.edition)) state.edition = editionDefinitions[0]?.id || "alianza";
+state.pages = clamp(Math.round(Number(state.pages) || 320), 32, 1200);
 
 function makeMapCanvas() {
   const map = document.createElement("canvas");
@@ -37,6 +108,12 @@ function makeMapCanvas() {
 
 const roughCanvas = makeMapCanvas();
 const coatCanvas = makeMapCanvas();
+const backCanvas = document.querySelector("#back-preview");
+backCanvas.width = W;
+backCanvas.height = H;
+const spineCanvas = document.querySelector("#spine-preview");
+spineCanvas.width = 512;
+spineCanvas.height = H;
 const roughCtx = roughCanvas.getContext("2d");
 const coatCtx = coatCanvas.getContext("2d");
 
@@ -134,7 +211,70 @@ const DEBOLSILLO_FONT = "Arial";
 const TEXT_MARGIN = 88;
 const textPlace = { x: 86, y: Math.round(2400 * 0.24) };
 const textBounds = { x: 86, y: 576, w: 700, h: 320 };
-let textPlacedByUser = false;
+if (Number.isFinite(persistedDraft?.textPlace?.x)) textPlace.x = persistedDraft.textPlace.x;
+if (Number.isFinite(persistedDraft?.textPlace?.y)) textPlace.y = persistedDraft.textPlace.y;
+let textPlacedByUser = Boolean(persistedDraft?.textPlacedByUser);
+let persistenceReady = false;
+let persistTimer = null;
+
+async function persistDraftNow() {
+  const db = await openDraftDb().catch((error) => {
+    console.warn("Could not save the cover draft.", error);
+    return null;
+  });
+  if (!db) return;
+  const draft = {
+    settings: {
+      author: state.author,
+      title: state.title,
+      zoom: state.zoom,
+      panX: state.panX,
+      panY: state.panY,
+      position: state.position,
+      scheme: state.scheme,
+      edition: state.edition,
+      series: state.series,
+      authorColor: state.authorColor,
+      titleColor: state.titleColor,
+      pages: state.pages,
+      backQuote: state.backQuote,
+      backCopy: state.backCopy,
+    },
+    templateOptions: Object.fromEntries([...templateOptionStates].map(([id, values]) => [id, { ...values }])),
+    textPlace: { x: textPlace.x, y: textPlace.y },
+    textPlacedByUser,
+    selectedSurface,
+    coverImage: state.imageBlob || null,
+    coverImageName: state.imageName || "",
+    authorImage: state.authorImageBlob || null,
+    authorImageName: state.authorImageName || "",
+  };
+  try {
+    await new Promise((resolve, reject) => {
+      const transaction = db.transaction(DRAFT_STORE, "readwrite");
+      transaction.objectStore(DRAFT_STORE).put(draft, DRAFT_KEY);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } catch (error) {
+    console.warn("Could not save the cover draft.", error);
+  } finally {
+    db.close();
+  }
+}
+
+function scheduleDraftSave() {
+  if (!persistenceReady) return;
+  window.clearTimeout(persistTimer);
+  persistTimer = window.setTimeout(persistDraftNow, 250);
+}
+
+window.addEventListener("pagehide", () => {
+  if (!persistenceReady) return;
+  window.clearTimeout(persistTimer);
+  persistDraftNow();
+});
 
 function fitSingleLine(text, maxWidth, maxSize, minSize, weight, family = COVER_FONT) {
   let size = maxSize;
@@ -351,6 +491,135 @@ function drawPenguinCover() {
   }
 }
 
+function drawPenguinBack() {
+  const backCtx = backCanvas.getContext("2d");
+  backCtx.clearRect(0, 0, W, H);
+  backCtx.fillStyle = "#111211";
+  backCtx.fillRect(0, 0, W, H);
+  const pad = 118;
+  const quote = state.backQuote.trim();
+  const quoteSize = 48;
+  backCtx.fillStyle = "#f15a22";
+  backCtx.font = `italic ${quoteSize}px 'Libre Baskerville', Georgia, serif`;
+  backCtx.textAlign = "center";
+  backCtx.textBaseline = "top";
+  let y = 140;
+  for (const line of wrapText(backCtx, quote, W - pad * 2).slice(0, 5)) {
+    backCtx.fillText(line, W / 2, y);
+    y += quoteSize * 1.45;
+  }
+
+  y += 62;
+  const copyParagraphs = state.backCopy.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+  let fontSize = 40;
+  const bottomLimit = H - 520;
+  const lineHeight = () => fontSize * 1.32;
+  function layoutCopy() {
+    backCtx.font = `400 ${fontSize}px Arial, sans-serif`;
+    return copyParagraphs.map((paragraph) => wrapText(backCtx, paragraph, W - pad * 2));
+  }
+  let blocks = layoutCopy();
+  while (fontSize > 28) {
+    const lineCount = blocks.reduce((sum, lines) => sum + lines.length, 0);
+    if (y + lineCount * lineHeight() + copyParagraphs.length * 24 <= bottomLimit) break;
+    fontSize -= 1;
+    blocks = layoutCopy();
+  }
+  backCtx.fillStyle = "#f0efec";
+  backCtx.font = `400 ${fontSize}px Arial, sans-serif`;
+  backCtx.textAlign = "left";
+  for (const lines of blocks) {
+    for (const line of lines) {
+      if (y + lineHeight() > bottomLimit) break;
+      backCtx.fillText(line, pad, y);
+      y += lineHeight();
+    }
+    y += 26;
+  }
+
+  const bandY = H - 398;
+  backCtx.fillStyle = "#f1eee5";
+  backCtx.fillRect(0, bandY, W, 120);
+  backCtx.fillStyle = "#111";
+  backCtx.textBaseline = "middle";
+  backCtx.textAlign = "center";
+  backCtx.font = "500 30px Arial, sans-serif";
+  backCtx.letterSpacing = "0.55em";
+  backCtx.fillText("P E N G U I N", W * 0.32, bandY + 60);
+  backCtx.fillText("C L A S S I C S", W * 0.72, bandY + 60);
+  if (penguinLogo.complete && penguinLogo.naturalWidth) {
+    const logoH = 78;
+    const logoW = logoH * penguinLogo.naturalWidth / penguinLogo.naturalHeight;
+    backCtx.drawImage(penguinLogo, W / 2 - logoW / 2, bandY + 60 - logoH / 2, logoW, logoH);
+  }
+  backCtx.letterSpacing = "0px";
+  backCtx.fillStyle = "#e9e6df";
+  backCtx.font = "italic 44px 'Libre Baskerville', Georgia, serif";
+  backCtx.fillText("www.penguinclassics.com", W / 2, H - 182);
+}
+
+function drawPenguinSpine() {
+  const spineDepthMm = Math.max(10, state.pages * 0.09) + 0.35 * 2 + 0.02 * 2;
+  spineCanvas.width = Math.round(H * spineDepthMm / 198);
+  const spineCtx = spineCanvas.getContext("2d");
+  spineCtx.fillStyle = "#111211";
+  spineCtx.fillRect(0, 0, spineCanvas.width, spineCanvas.height);
+  spineCtx.save();
+  spineCtx.translate(spineCanvas.width / 2, 0);
+  spineCtx.rotate(-Math.PI / 2);
+  spineCtx.textAlign = "center";
+  spineCtx.textBaseline = "middle";
+  spineCtx.fillStyle = "#f15a22";
+  let authorSize = 72;
+  const author = (state.author.trim() || "AUTOR").toLocaleUpperCase("es");
+  while (authorSize > 36) {
+    spineCtx.font = `700 ${authorSize}px Arial, sans-serif`;
+    if (spineCtx.measureText(author).width <= H * 0.22) break;
+    authorSize -= 2;
+  }
+  spineCtx.font = `700 ${authorSize}px Arial, sans-serif`;
+  spineCtx.letterSpacing = "0.12em";
+  spineCtx.fillText(author, -H * 0.14, 0);
+  spineCtx.fillStyle = "#eee8db";
+  let titleSize = 58;
+  const title = state.title.trim() || "Título del libro";
+  const titleWidth = H * 0.38;
+  while (titleSize > 34) {
+    spineCtx.font = `italic ${titleSize}px 'Libre Baskerville', Georgia, serif`;
+    if (spineCtx.measureText(title).width <= titleWidth) break;
+    titleSize -= 2;
+  }
+  spineCtx.font = `italic ${titleSize}px 'Libre Baskerville', Georgia, serif`;
+  spineCtx.letterSpacing = "0px";
+  const titleLines = wrapText(spineCtx, title, titleWidth).slice(0, 3);
+  titleLines.forEach((line, index) => spineCtx.fillText(line, -(H * 0.35 + index * 160), 0));
+  spineCtx.restore();
+
+  const whiteH = 118;
+  const blackH = Math.round(H * 0.24);
+  const bandY = H - whiteH - blackH;
+  spineCtx.fillStyle = "#f1eee5";
+  spineCtx.fillRect(0, bandY, spineCanvas.width, whiteH);
+  if (penguinLogo.complete && penguinLogo.naturalWidth) {
+    spineCtx.save();
+    spineCtx.translate(spineCanvas.width / 2, bandY + whiteH / 2);
+    const h = whiteH * 0.82;
+    const w = h * penguinLogo.naturalWidth / penguinLogo.naturalHeight;
+    spineCtx.drawImage(penguinLogo, -w / 2, -h / 2, w, h);
+    spineCtx.restore();
+  }
+  spineCtx.save();
+  spineCtx.translate(spineCanvas.width / 2, bandY + whiteH + (H - bandY - whiteH) / 2);
+  spineCtx.rotate(-Math.PI / 2);
+  spineCtx.fillStyle = "#f4f0e7";
+  spineCtx.textAlign = "center";
+  spineCtx.textBaseline = "middle";
+  spineCtx.font = "600 40px Arial, sans-serif";
+  spineCtx.letterSpacing = "0.18em";
+  spineCtx.fillText("PENGUIN CLASSICS", 0, 0);
+  spineCtx.restore();
+}
+
 function drawCover() {
   const author = state.author.trim() || "Autor";
   const title = state.title.trim() || "Título del libro";
@@ -436,12 +705,67 @@ let viewer = null;
 
 function syncBook() {
   if (!viewer) return;
-  viewer.sync({ edition: state.edition, pages: state.pages });
+  const definition = editionById.get(state.edition);
+  const template = definition?.kind === "template" ? definition : null;
+  const dimensions = template
+    ? {
+        widthMm: template.heightMm * template.assets.front.width / template.assets.front.height,
+        heightMm: template.heightMm,
+        mmPerPage: template.pages.mmPerPage,
+        minSpineMm: template.pages.minSpineMm,
+      }
+    : null;
+  viewer.sync({ edition: state.edition, pages: state.pages, template: Boolean(template), dimensions });
 }
 
 function redraw() {
-  drawCover();
+  const definition = editionById.get(state.edition);
+  if (definition?.kind === "template") {
+    const width = canvas.width;
+    const height = canvas.height;
+    const layout = drawTemplateFront(ctx, {
+      template: definition,
+      image: state.image,
+      state,
+      options: state.templateOptions,
+      width,
+      height,
+      wrapText,
+    });
+    drawTemplateBack(backCanvas.getContext("2d"), definition, width, height, {
+      layout,
+      image: state.image,
+      state,
+      copy: state.backCopy,
+      authorImage: state.authorImage,
+      wrapText,
+    });
+    const spineDepthMm = Math.max(definition.pages.minSpineMm, state.pages * definition.pages.mmPerPage) + 0.74;
+    drawTemplateSpine(spineCanvas.getContext("2d"), {
+      template: definition,
+      state,
+      width,
+      height,
+      spineWidth: height * spineDepthMm / definition.heightMm,
+      wrapText,
+    });
+  } else {
+    drawCover();
+    if (state.edition === "penguin") {
+      drawPenguinBack();
+      drawPenguinSpine();
+    } else {
+      const backCtx = backCanvas.getContext("2d");
+      backCtx.fillStyle = "#f7f4ee";
+      backCtx.fillRect(0, 0, backCanvas.width, backCanvas.height);
+      spineCanvas.width = Math.round(H * (Math.max(10, state.pages * 0.09) + 0.74) / 190);
+      const spineCtx = spineCanvas.getContext("2d");
+      spineCtx.fillStyle = "#f7f4ee";
+      spineCtx.fillRect(0, 0, spineCanvas.width, spineCanvas.height);
+    }
+  }
   syncBook();
+  scheduleDraftSave();
 }
 
 authorInput.addEventListener("input", () => {
@@ -451,6 +775,23 @@ authorInput.addEventListener("input", () => {
 
 titleInput.addEventListener("input", () => {
   state.title = titleInput.value;
+  redraw();
+});
+
+backQuoteInput.addEventListener("input", () => {
+  state.backQuote = backQuoteInput.value;
+  redraw();
+});
+
+backCopyInput.addEventListener("input", () => {
+  state.backCopy = backCopyInput.value;
+  templateBackCopyInput.value = state.backCopy;
+  redraw();
+});
+
+templateBackCopyInput.addEventListener("input", () => {
+  state.backCopy = templateBackCopyInput.value;
+  backCopyInput.value = state.backCopy;
   redraw();
 });
 
@@ -469,17 +810,153 @@ function bindChoice(id, key) {
   });
 }
 
-bindChoice("scheme", "scheme");
-
-bindChoice("position", "position");
 bindChoice("series", "series");
+document.querySelectorAll("#series button").forEach((button) => {
+  const active = button.dataset.value === state.series;
+  button.classList.toggle("is-active", active);
+  button.setAttribute("aria-pressed", String(active));
+});
 
 const caption = document.querySelector(".caption");
-const alianzaOptions = document.querySelector("#alianza-options");
 const debolsilloOptions = document.querySelector("#debolsillo-options");
+const templateOptions = document.querySelector("#template-options");
+const templateBackOptions = document.querySelector("#template-back-options");
+const authorPhotoField = document.querySelector("#author-photo-field");
+const authorPhotoInput = document.querySelector("#author-photo");
+const authorPhotoName = document.querySelector("#author-photo-name");
+const templateOptionStates = new Map(Object.entries(defaultTemplateOptions));
+for (const [id, savedOptions] of Object.entries(persistedDraft?.templateOptions || {})) {
+  if (templateOptionStates.has(id) && savedOptions && typeof savedOptions === "object") {
+    templateOptionStates.set(id, { ...templateOptionStates.get(id), ...savedOptions });
+  }
+}
+state.templateOptions = templateOptionStates.get(state.edition) || state.templateOptions;
+
+authorInput.value = state.author;
+titleInput.value = state.title;
+pagesInput.value = String(state.pages);
+pagesSlider.value = String(state.pages);
+backQuoteInput.value = state.backQuote;
+backCopyInput.value = state.backCopy;
+templateBackCopyInput.value = state.backCopy;
+zoomInput.value = String(state.zoom);
+panXInput.value = String(state.panX * 100);
+panYInput.value = String(state.panY * 100);
+zoomInput.disabled = !state.imageBlob;
+panXInput.disabled = !state.imageBlob;
+panYInput.disabled = !state.imageBlob;
+
+function setCanvasForEdition(definition) {
+  const isTemplate = definition?.kind === "template";
+  const width = W;
+  const height = isTemplate
+    ? Math.round(width * definition.assets.front.height / definition.assets.front.width)
+    : H;
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  if (backCanvas.width !== width) backCanvas.width = width;
+  if (backCanvas.height !== height) backCanvas.height = height;
+  if (spineCanvas.height !== height) spineCanvas.height = height;
+}
+
+function renderTemplateOptions(definition) {
+  templateOptions.replaceChildren();
+  const controls = definition?.kind === "template" ? (definition.front.controls || []) : [];
+  templateOptions.hidden = controls.length === 0;
+  if (!controls.length) return;
+  const values = templateOptionStates.get(definition.id);
+
+  for (const control of controls) {
+    if (control.type === "choice") {
+      const fieldset = document.createElement("fieldset");
+      fieldset.className = "choice";
+      const legend = document.createElement("legend");
+      legend.textContent = control.label;
+      const row = document.createElement("div");
+      row.className = "choice-row";
+      row.dataset.control = control.id;
+      for (const option of control.options) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.value = option.value;
+        button.textContent = option.label;
+        button.classList.toggle("is-active", values[control.id] === option.value);
+        button.setAttribute("aria-pressed", String(values[control.id] === option.value));
+        row.append(button);
+      }
+      fieldset.append(legend, row);
+      templateOptions.append(fieldset);
+      continue;
+    }
+
+    if (control.type === "range") {
+      const label = document.createElement("label");
+      label.append(document.createTextNode(control.label));
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = control.min;
+      input.max = control.max;
+      input.step = control.step;
+      input.value = values[control.id];
+      input.dataset.control = control.id;
+      const output = document.createElement("output");
+      output.className = "range-output";
+      output.dataset.output = control.id;
+      output.textContent = control.format === "percent"
+        ? `${Math.round(Number(input.value) * 100)}%`
+        : input.value;
+      label.append(input, output);
+      templateOptions.append(label);
+    }
+  }
+}
+
+function syncTemplateOption(controlId, value) {
+  const definition = editionById.get(state.edition);
+  if (definition?.kind !== "template") return;
+  const values = templateOptionStates.get(definition.id);
+  values[controlId] = value;
+  state.templateOptions = values;
+  const control = definition.front.controls.find((item) => item.id === controlId);
+  if (control?.type === "range") {
+    const output = templateOptions.querySelector(`[data-output="${controlId}"]`);
+    if (output) output.textContent = control.format === "percent"
+      ? `${Math.round(Number(value) * 100)}%`
+      : value;
+  }
+  templateOptions.querySelectorAll(`[data-control="${controlId}"] button`).forEach((button) => {
+    const active = button.dataset.value === value;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  redraw();
+}
+
+templateOptions.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-value]");
+  if (button) {
+    const controlId = button.closest(".choice-row").dataset.control;
+    if (controlId === "bandPosition") {
+      const values = templateOptionStates.get(state.edition);
+      values.bandY = button.dataset.value === "top" ? 0.052 : 0.95;
+      renderTemplateOptions(editionById.get(state.edition));
+    }
+    syncTemplateOption(controlId, button.dataset.value);
+  }
+});
+templateOptions.addEventListener("input", (event) => {
+  const input = event.target.closest("input[type=range][data-control]");
+  if (input) syncTemplateOption(input.dataset.control, Number(input.value));
+});
 
 function editionCaption() {
   const pages = `${state.pages} páginas`;
+  const definition = editionById.get(state.edition);
+  if (definition?.kind === "template") {
+    const height = definition.heightMm;
+    const width = height * definition.assets.front.width / definition.assets.front.height;
+    return `${definition.name.replace(/ \[[^\]]+\]$/, "")} · ${width.toFixed(0)} × ${height} mm · ${pages}`;
+  }
   if (state.edition === "debolsillo") return `Debolsillo · 125 × 190 mm · ${pages}`;
   if (state.edition === "penguin") return `Penguin Clásicos · 129 × 198 mm · ${pages}`;
   return `Alianza Editorial · 120 × 180 mm · ${pages}`;
@@ -488,21 +965,43 @@ function editionCaption() {
 function editionHint() {
   if (previewing) return "Drag the book to turn it.";
   if (state.edition === "debolsillo") {
-    return "Drag the author and title together. Drag the rest of the photo to frame it.";
+    return "Use the position sliders to frame the photo. Drag the author and title to reposition them.";
   }
-  return "Drag the photo on the cover to frame it.";
+  return "Use the position sliders to frame the cover image.";
+}
+
+const editionButtons = document.querySelector(".editions");
+for (const definition of editionDefinitions) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "edition";
+  button.classList.toggle("is-active", definition.id === state.edition);
+  button.dataset.edition = definition.id;
+  button.textContent = definition.name;
+  button.setAttribute("aria-pressed", String(definition.id === state.edition));
+  editionButtons.append(button);
 }
 
 document.querySelectorAll(".edition[data-edition]").forEach((button) => {
   button.addEventListener("click", () => {
     state.edition = button.dataset.edition;
+    const definition = editionById.get(state.edition);
+    setCanvasForEdition(definition);
+    if (definition?.kind === "template") {
+      state.templateOptions = templateOptionStates.get(definition.id);
+    }
     document.querySelectorAll(".edition[data-edition]").forEach((item) => {
       const active = item === button;
       item.classList.toggle("is-active", active);
       item.setAttribute("aria-pressed", String(active));
     });
-    alianzaOptions.hidden = state.edition !== "alianza";
+    renderTemplateOptions(definition);
+    const hasBackCopy = definition?.kind === "template" && Boolean(definition.back?.copy);
+    templateBackOptions.hidden = !hasBackCopy;
+    authorPhotoField.hidden = !definition?.back?.authorPhoto;
+    templateBackCopyInput.value = state.backCopy;
     debolsilloOptions.hidden = state.edition !== "debolsillo";
+    document.querySelector("#penguin-options").hidden = state.edition !== "penguin";
     document.querySelector(".hint").textContent = editionHint();
     caption.textContent = editionCaption();
     fontNote.hidden = state.edition !== "alianza" || coverFontReady();
@@ -510,8 +1009,18 @@ document.querySelectorAll(".edition[data-edition]").forEach((button) => {
   });
 });
 
+renderTemplateOptions(editionById.get(state.edition));
+setCanvasForEdition(editionById.get(state.edition));
+templateBackOptions.hidden = !editionById.get(state.edition)?.back?.copy;
+authorPhotoField.hidden = !editionById.get(state.edition)?.back?.authorPhoto;
+debolsilloOptions.hidden = state.edition !== "debolsillo";
+document.querySelector("#penguin-options").hidden = state.edition !== "penguin";
+templateBackCopyInput.value = state.backCopy;
+
 document.querySelectorAll(".swatch-dots button").forEach((button) => {
   button.style.setProperty("--swatch", button.dataset.color);
+  const row = button.closest(".swatch-row");
+  button.classList.toggle("is-on", button.dataset.color === state[row.dataset.target]);
 });
 
 document.querySelector(".swatches").addEventListener("click", (event) => {
@@ -527,15 +1036,21 @@ document.querySelector(".swatches").addEventListener("click", (event) => {
 
 const photoName = document.querySelector("#photo-name");
 
-function rememberImage(img, url) {
+function rememberImage(img, url, blob, name) {
   if (state.imageUrl && state.imageUrl.startsWith("blob:")) URL.revokeObjectURL(state.imageUrl);
   state.image = img;
   state.imageUrl = url;
+  state.imageBlob = blob;
+  state.imageName = name || "";
   state.zoom = 1;
   state.panX = 0;
   state.panY = 0;
   zoomInput.value = "1";
   zoomInput.disabled = false;
+  panXInput.value = "0";
+  panYInput.value = "0";
+  panXInput.disabled = false;
+  panYInput.disabled = false;
   canvas.classList.add("has-photo");
   redraw();
 }
@@ -555,15 +1070,71 @@ photoInput.addEventListener("change", () => {
   if (!file) return;
   const url = URL.createObjectURL(file);
   loadCoverImage(url, false).then((img) => {
-    rememberImage(img, url);
+    rememberImage(img, url, file, file.name);
     photoName.textContent = file.name;
     photoName.title = file.name;
-  });
+  }).catch(() => URL.revokeObjectURL(url));
 });
+
+authorPhotoInput.addEventListener("change", () => {
+  const file = authorPhotoInput.files && authorPhotoInput.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  loadCoverImage(url, false).then((img) => {
+    if (state.authorImageUrl?.startsWith("blob:")) URL.revokeObjectURL(state.authorImageUrl);
+    state.authorImage = img;
+    state.authorImageUrl = url;
+    state.authorImageBlob = file;
+    state.authorImageName = file.name;
+    authorPhotoName.textContent = file.name;
+    authorPhotoName.title = file.name;
+    redraw();
+  }).catch(() => URL.revokeObjectURL(url));
+});
+
+async function restoreSavedImages() {
+  if (state.imageBlob) {
+    const url = URL.createObjectURL(state.imageBlob);
+    try {
+      state.image = await loadCoverImage(url, false);
+      state.imageUrl = url;
+      canvas.classList.add("has-photo");
+      photoName.textContent = state.imageName;
+      photoName.title = state.imageName;
+    } catch {
+      URL.revokeObjectURL(url);
+      state.imageBlob = null;
+      state.imageName = "";
+    }
+  }
+  if (state.authorImageBlob) {
+    const url = URL.createObjectURL(state.authorImageBlob);
+    try {
+      state.authorImage = await loadCoverImage(url, false);
+      state.authorImageUrl = url;
+      authorPhotoName.textContent = state.authorImageName;
+      authorPhotoName.title = state.authorImageName;
+    } catch {
+      URL.revokeObjectURL(url);
+      state.authorImageBlob = null;
+      state.authorImageName = "";
+    }
+  }
+}
 
 
 zoomInput.addEventListener("input", () => {
   state.zoom = Number(zoomInput.value);
+  redraw();
+});
+
+panXInput.addEventListener("input", () => {
+  state.panX = Number(panXInput.value) / 100;
+  redraw();
+});
+
+panYInput.addEventListener("input", () => {
+  state.panY = Number(panYInput.value) / 100;
   redraw();
 });
 
@@ -572,6 +1143,8 @@ document.querySelector("#reset").addEventListener("click", () => {
   state.panX = 0;
   state.panY = 0;
   zoomInput.value = "1";
+  panXInput.value = "0";
+  panYInput.value = "0";
   redraw();
 });
 
@@ -598,8 +1171,8 @@ const previewButton = document.querySelector("#preview");
 function canvasPoint(event) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: (event.clientX - rect.left) * (W / rect.width),
-    y: (event.clientY - rect.top) * (H / rect.height),
+    x: (event.clientX - rect.left) * (canvas.width / rect.width),
+    y: (event.clientY - rect.top) * (canvas.height / rect.height),
   };
 }
 
@@ -615,16 +1188,16 @@ function hitsText(point) {
 function endDrag() {
   dragging = false;
   dragText = false;
-  canvas.classList.remove("is-dragging", "is-moving");
+  canvas.classList.remove("is-moving");
 }
 
 canvas.addEventListener("pointerdown", (event) => {
   if (previewing) return;
   const point = canvasPoint(event);
   dragText = hitsText(point);
-  if (!dragText && !state.image) return;
+  if (!dragText) return;
   dragging = true;
-  canvas.classList.add(dragText ? "is-moving" : "is-dragging");
+  canvas.classList.add("is-moving");
   canvas.setPointerCapture(event.pointerId);
   lastPoint = { x: event.clientX, y: event.clientY, textX: textPlace.x, textY: textPlace.y };
 });
@@ -637,19 +1210,11 @@ canvas.addEventListener("pointermove", (event) => {
   }
   const rect = canvas.getBoundingClientRect();
   if (dragText) {
-    const dx = (event.clientX - lastPoint.x) * (W / rect.width);
-    const dy = (event.clientY - lastPoint.y) * (H / rect.height);
+    const dx = (event.clientX - lastPoint.x) * (canvas.width / rect.width);
+    const dy = (event.clientY - lastPoint.y) * (canvas.height / rect.height);
     textPlacedByUser = true;
     textPlace.x = clamp(lastPoint.textX + dx, TEXT_MARGIN, Math.max(TEXT_MARGIN, W - TEXT_MARGIN - textBounds.w));
     textPlace.y = clamp(lastPoint.textY + dy, TEXT_MARGIN, Math.max(TEXT_MARGIN, H - TEXT_MARGIN - textBounds.h));
-  } else if (state.image) {
-    const dx = (event.clientX - lastPoint.x) / rect.width;
-    const dy = (event.clientY - lastPoint.y) / rect.height;
-    const reach = 1.6 / state.zoom;
-    state.panX = clamp(state.panX - dx * reach * 2, -1, 1);
-    state.panY = clamp(state.panY - dy * reach * 2, -1, 1);
-    lastPoint.x = event.clientX;
-    lastPoint.y = event.clientY;
   }
   redraw();
 });
@@ -658,11 +1223,32 @@ canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
 
 const editCoverButton = document.querySelector("#edit-cover");
+let selectedSurface = ["front", "spine", "back"].includes(persistedDraft?.selectedSurface)
+  ? persistedDraft.selectedSurface
+  : "front";
+
+function selectSurface(surface) {
+  selectedSurface = surface;
+  for (const item of [canvas, spineCanvas, backCanvas]) {
+    item.hidden = item.id !== ({ front: "cover", spine: "spine-preview", back: "back-preview" }[surface]);
+  }
+  previewSwitcher.querySelectorAll("button[data-surface]").forEach((button) => {
+    const active = button.dataset.surface === surface;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  scheduleDraftSave();
+}
+
+previewSwitcher.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-surface]");
+  if (button) selectSurface(button.dataset.surface);
+});
 
 function setPreview(on) {
   previewing = on;
   document.body.classList.toggle("is-preview", on);
-  canvas.hidden = on;
+  surfacePreview.hidden = on;
   view.hidden = !on;
   editCoverButton.hidden = !on;
   previewButton.setAttribute("aria-pressed", String(on));
@@ -680,13 +1266,18 @@ function commitPages(force) {
   if (!Number.isFinite(value)) return;
   if (!force && (value < 32 || value > 1200)) return;
   state.pages = clamp(Math.round(value), 32, 1200);
-  if (force) pagesInput.value = String(state.pages);
+  pagesInput.value = String(state.pages);
+  pagesSlider.value = String(state.pages);
   caption.textContent = editionCaption();
-  syncBook();
+  redraw();
 }
 
 pagesInput.addEventListener("input", () => commitPages(false));
 pagesInput.addEventListener("change", () => commitPages(true));
+pagesSlider.addEventListener("input", () => {
+  pagesInput.value = pagesSlider.value;
+  commitPages(false);
+});
 
 const fontNote = document.querySelector("#font-note");
 
@@ -712,6 +1303,9 @@ document.fonts.ready.then(async () => {
 loadAuthorFace();
 document.querySelector(".hint").textContent = editionHint();
 caption.textContent = editionCaption();
+await restoreSavedImages();
+selectSurface(selectedSurface);
+persistenceReady = true;
 redraw();
 
 mountBook({
@@ -719,6 +1313,8 @@ mountBook({
   coverCanvas: canvas,
   roughCanvas,
   coatCanvas,
+  backCanvas,
+  spineCanvas,
 }).then((api) => {
   viewer = api;
   syncBook();

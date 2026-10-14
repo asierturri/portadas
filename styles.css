@@ -72,11 +72,10 @@ body {
   max-width: 100%;
   background: var(--panel);
   border-radius: 22px;
-  padding: 28px 26px 22px;
   display: flex;
+  flex-direction: column;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .stage-balance {
@@ -85,14 +84,23 @@ body {
 }
 
 form {
-  flex: 1;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-width: 0;
   min-height: 0;
   max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 26px 20px 28px 24px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #68727e transparent;
+  overscroll-behavior: contain;
 }
+
+form > * { flex-shrink: 0; }
 
 label {
   display: flex;
@@ -184,9 +192,11 @@ input[type="range"] {
   font-size: 14px;
 }
 
-#photo-name:empty { display: none; }
+#photo-name:empty,
+#author-photo-name:empty { display: none; }
 
-#photo-name {
+#photo-name,
+#author-photo-name {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -231,15 +241,27 @@ input[type="range"] {
 }
 
 #alianza-options,
-#debolsillo-options {
+#debolsillo-options,
+#template-options,
+#template-back-options {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
 #alianza-options[hidden],
-#debolsillo-options[hidden] {
+#debolsillo-options[hidden],
+#template-options[hidden],
+#template-back-options[hidden],
+#author-photo-field[hidden] {
   display: none;
+}
+
+.range-output {
+  align-self: flex-end;
+  margin-top: -6px;
+  color: var(--ink);
+  font-size: 14px;
 }
 
 .swatches {
@@ -312,10 +334,14 @@ input[type="range"] {
 
 .actions {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: auto;
-  padding-top: 12px;
+  justify-content: center;
+  gap: 10px;
+}
+
+.panel-actions {
+  flex: none;
+  padding: 14px 20px 18px;
+  border-top: 1px solid #414a55;
 }
 
 button {
@@ -347,26 +373,65 @@ button {
 }
 
 .panel,
-#cover,
+#surface-preview,
 #book-view {
   pointer-events: auto;
 }
 
-#cover {
-  display: block;
+#surface-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
   flex: none;
+  width: min(calc(100vw - 2 * min(400px, 30vw) - 160px), 68vh);
   height: 100%;
-  width: auto;
-  max-width: calc(100vw - 2 * min(400px, 30vw) - 160px);
-  background: #111;
-  cursor: grab;
-  touch-action: none;
+  min-width: 0;
 }
 
-#cover.is-dragging { cursor: grabbing; }
-#cover.is-moving,
-#cover.is-moving.is-dragging { cursor: move; }
-#cover:not(.has-photo):not(.is-moving) { cursor: default; }
+#preview-switcher {
+  flex: none;
+  justify-content: center;
+  width: 100%;
+  min-height: 42px;
+  gap: 12px;
+}
+
+#preview-switcher button {
+  background: var(--field);
+  color: #f2f4f7;
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+#preview-switcher button:not(.is-active):hover { background: #46505c; }
+
+#preview-switcher button.is-active {
+  background: #d5dbe3;
+  color: #171b20;
+}
+
+#surface-preview canvas {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: auto;
+  max-width: 100%;
+  height: calc(100% - 44px);
+  object-fit: contain;
+  background: #111;
+}
+
+#spine-preview,
+#back-preview { background: #f7f4ee; }
+
+#surface-preview canvas[hidden] { display: none; }
+
+#cover { cursor: default; }
+
+#cover.is-moving { cursor: move; }
 
 #book-view {
   width: min(720px, 100%);
@@ -384,7 +449,7 @@ button {
   cursor: inherit;
 }
 
-#cover[hidden],
+#surface-preview[hidden],
 #book-view[hidden],
 #edit-cover[hidden] {
   display: none;
@@ -464,12 +529,23 @@ body.is-preview #edit-cover {
 
   .stage-balance { display: none; }
 
-  #cover {
-    height: auto;
+  #surface-preview {
     width: min(420px, 100%);
     max-width: 100%;
+    height: auto;
     order: -1;
     margin-bottom: 24px;
+  }
+
+  #surface-preview canvas {
+    flex: none;
+    height: auto;
+    width: 100%;
+  }
+
+  #surface-preview canvas#spine-preview:not([hidden]) {
+    width: auto;
+    height: min(70vh, 620px);
   }
 
   .panel {
@@ -477,4 +553,6 @@ body.is-preview #edit-cover {
     height: auto;
     overflow: visible;
   }
+
+  .panel form { flex: none; overflow: visible; }
 }

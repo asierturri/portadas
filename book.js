@@ -97,12 +97,13 @@ function pageTextures(THREE) {
     canvas.width = alongX ? length : 8;
     canvas.height = alongX ? 8 : length;
     const g = canvas.getContext("2d");
-    g.fillStyle = "#f4efe6";
+    g.fillStyle = "#f8f5ee";
     g.fillRect(0, 0, canvas.width, canvas.height);
-    g.fillStyle = "#ddd4c6";
     for (let i = 0; i < length; i += 4) {
-      if (alongX) g.fillRect(i, 0, 1, 8);
-      else g.fillRect(0, i, 8, 1);
+      const pageGroup = i % 16 === 0;
+      g.fillStyle = pageGroup ? "#cbbfae" : "#ded5c7";
+      if (alongX) g.fillRect(i, 0, pageGroup ? 2 : 1, 8);
+      else g.fillRect(0, i, 8, pageGroup ? 2 : 1);
     }
     return canvas;
   }
@@ -120,7 +121,7 @@ function pageTextures(THREE) {
   return { foreMap, topMap, linesPerTile };
 }
 
-export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) {
+export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, backCanvas, spineCanvas }) {
   const THREE = await import("three");
   const { OrbitControls } = await import("three/addons/controls/OrbitControls.js");
 
@@ -179,6 +180,11 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) 
   key.shadow.camera.bottom = -3;
   key.shadow.bias = -0.0004;
   scene.add(key);
+  const backKey = new THREE.DirectionalLight(0xfff2df, 2.2);
+  backKey.position.set(-1.2, 2.2, -3.4);
+  scene.add(backKey);
+  const ambient = new THREE.HemisphereLight(0xffffff, 0x70675e, 0.72);
+  scene.add(ambient);
   const skim = new THREE.DirectionalLight(0xfff8ef, 1.55);
   skim.position.set(-1.6, -0.15, 4.2);
   scene.add(skim);
@@ -198,6 +204,22 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) 
   coverMap.colorSpace = THREE.SRGBColorSpace;
   coverMap.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
+  const backMap = new THREE.CanvasTexture(backCanvas);
+  const spineMap = new THREE.CanvasTexture(spineCanvas);
+  for (const texture of [backMap, spineMap]) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = coverMap.anisotropy;
+  }
+
+  const frontSpineEdgeMap = coverMap.clone();
+  const backSpineEdgeMap = backMap.clone();
+  for (const texture of [frontSpineEdgeMap, backSpineEdgeMap]) {
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = coverMap.anisotropy;
+  }
+
   const roughMap = new THREE.CanvasTexture(roughCanvas);
   const coatMap = new THREE.CanvasTexture(coatCanvas);
   for (const texture of [roughMap, coatMap]) {
@@ -214,6 +236,27 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) 
     metalness: 0,
     roughness: 1,
   });
+  const backMat = new THREE.MeshPhysicalMaterial({
+    map: backMap,
+    metalness: 0,
+    roughness: 1,
+  });
+  const templateBackMat = new THREE.MeshBasicMaterial({
+    map: backMap,
+    color: 0xffffff,
+  });
+  const spineMat = new THREE.MeshPhysicalMaterial({
+    map: spineMap,
+    metalness: 0,
+    roughness: 1,
+  });
+  const spineCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const spineJoinMat = new THREE.MeshBasicMaterial({
+    colorWrite: false,
+    depthWrite: false,
+  });
+  const frontSpineEdgeMat = new THREE.MeshStandardMaterial({ map: frontSpineEdgeMap, roughness: 1 });
+  const backSpineEdgeMat = new THREE.MeshStandardMaterial({ map: backSpineEdgeMap, roughness: 1 });
   const stockMat = new THREE.MeshPhysicalMaterial({
     color: 0xf3efe6,
     metalness: 0,
@@ -237,6 +280,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) 
   let built = null;
   let appliedEdition = null;
   let frameReady = false;
+  let backMesh = null;
   const pointer = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
   let pickMesh = null;
@@ -247,12 +291,15 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) 
       book.remove(child);
     }
     pickMesh = null;
+    backMesh = null;
   }
 
-  function applyLook(edition) {
+  function applyLook(edition, isTemplate = false) {
     if (edition === appliedEdition) return;
     appliedEdition = edition;
     frontMat.map = coverMap;
+    backMat.map = isTemplate || edition === "penguin" ? backMap : null;
+    spineMat.map = isTemplate || edition === "penguin" ? spineMap : null;
     frontMat.metalness = 0;
     stockMat.metalness = 0;
     stockMat.map = null;
@@ -307,21 +354,45 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) 
       stockMat.normalScale.set(0.9, 0.9);
       stockMat.envMapIntensity = 0.28;
     }
+    backMat.color.set(isTemplate ? "#ffffff" : stockMat.color);
+    spineMat.color.set(isTemplate ? "#ffffff" : stockMat.color);
+    backMat.roughness = stockMat.roughness;
+    spineMat.roughness = stockMat.roughness;
+    frontSpineEdgeMat.copy(frontMat);
+    frontSpineEdgeMat.map = frontSpineEdgeMap;
+    backSpineEdgeMat.copy(backMat);
+    backSpineEdgeMat.map = backSpineEdgeMap;
     frontMat.needsUpdate = true;
+    backMat.needsUpdate = true;
+    spineMat.needsUpdate = true;
+    frontSpineEdgeMat.needsUpdate = true;
+    backSpineEdgeMat.needsUpdate = true;
     stockMat.needsUpdate = true;
   }
 
-  function rebuild(edition, pages) {
+  function rebuild(edition, pages, dimensions = null) {
     disposeGroup();
-    const size = EDITION_MM[edition] || EDITION_MM.alianza;
-    const pageMm = Math.max(10, pages * 0.09);
+    const size = dimensions || EDITION_MM[edition] || EDITION_MM.alianza;
+    const pageMm = Math.max(dimensions?.minSpineMm || 10, pages * (dimensions?.mmPerPage || 0.09));
     const width = size.w * MM;
     const height = size.h * MM;
     const depth = pageMm * MM;
     const board = 0.35 * MM;
+    // Keep only a hairline of the printed spine artwork at the outside edge.
+    // The remaining original spine width is a plain white core behind it.
+    const spineLip = 0.01 * MM;
     const gap = 0.02 * MM;
+    const spineCoreWidth = Math.max(0, board - spineLip);
+    const coverWidth = width + spineCoreWidth;
+    const coverShiftX = -spineCoreWidth / 2;
 
-    const lineCount = Math.max(1, Math.min(pages, 96) / pagesTex.linesPerTile);
+    const edgeFraction = board / width;
+    frontSpineEdgeMap.repeat.set(edgeFraction, 1);
+    frontSpineEdgeMap.offset.set(0, 0);
+    backSpineEdgeMap.repeat.set(edgeFraction, 1);
+    backSpineEdgeMap.offset.set(1 - edgeFraction, 0);
+
+    const lineCount = Math.max(1, Math.min(pages, 160) / pagesTex.linesPerTile);
     pagesTex.foreMap.repeat.set(lineCount, 1);
     pagesTex.topMap.repeat.set(1, lineCount);
 
@@ -336,29 +407,43 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) 
     book.add(pagesMesh);
 
     const front = new THREE.Mesh(
-      new THREE.BoxGeometry(width, height, board),
-      [stockMat, stockMat, stockMat, stockMat, frontMat, stockMat]
+      new THREE.BoxGeometry(coverWidth, height, board),
+      [spineCoreMat, frontSpineEdgeMat, spineCoreMat, spineCoreMat, frontMat, spineCoreMat]
     );
+    front.position.x = coverShiftX;
     front.position.z = depth / 2 + board / 2 + gap;
     front.castShadow = true;
     front.receiveShadow = true;
     book.add(front);
 
     const back = new THREE.Mesh(
-      new THREE.BoxGeometry(width, height, board),
-      stockMat
+      new THREE.BoxGeometry(coverWidth, height, board),
+      [spineCoreMat, backSpineEdgeMat, spineCoreMat, spineCoreMat, spineCoreMat, backMat]
     );
+    back.position.x = coverShiftX;
     back.position.z = -(depth / 2 + board / 2 + gap);
     back.castShadow = true;
     back.receiveShadow = true;
     book.add(back);
+    backMesh = back;
 
     const spineDepth = depth + board * 2 + gap * 2;
-    const spine = new THREE.Mesh(
-      new THREE.BoxGeometry(board, height, spineDepth),
-      stockMat
+    const spineCoreDepth = Math.max(0, spineDepth - board * 2);
+    const spineOuterX = -width / 2 - board;
+    const spineCore = new THREE.Mesh(
+      new THREE.BoxGeometry(spineCoreWidth, height, spineCoreDepth),
+      [spineCoreMat, spineJoinMat, spineCoreMat, spineCoreMat, spineCoreMat, spineCoreMat]
     );
-    spine.position.x = -width / 2 - board / 2;
+    spineCore.position.x = spineOuterX + spineLip + spineCoreWidth / 2;
+    spineCore.castShadow = true;
+    spineCore.receiveShadow = true;
+    book.add(spineCore);
+
+    const spine = new THREE.Mesh(
+      new THREE.BoxGeometry(spineLip, height, spineDepth),
+      [spineJoinMat, spineMat, stockMat, stockMat, frontSpineEdgeMat, backSpineEdgeMat]
+    );
+    spine.position.x = spineOuterX + spineLip / 2;
     spine.castShadow = true;
     spine.receiveShadow = true;
     book.add(spine);
@@ -440,13 +525,26 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas }) 
       resize();
       placeCamera(false);
     },
-    sync({ edition, pages }) {
+    sync({ edition, pages, template = false, dimensions = null }) {
       const nextPages = Math.round(pages);
+      const size = dimensions ? {
+        w: dimensions.widthMm,
+        h: dimensions.heightMm,
+        minSpineMm: dimensions.minSpineMm,
+        mmPerPage: dimensions.mmPerPage,
+      } : null;
       if (!built || built.edition !== edition || built.pages !== nextPages) {
-        rebuild(edition, nextPages);
+        rebuild(edition, nextPages, size);
       }
-      applyLook(edition);
+      applyLook(edition, template);
+      if (backMesh) {
+        backMesh.material[5] = template ? templateBackMat : backMat;
+      }
       coverMap.needsUpdate = true;
+      backMap.needsUpdate = true;
+      spineMap.needsUpdate = true;
+      frontSpineEdgeMap.needsUpdate = true;
+      backSpineEdgeMap.needsUpdate = true;
       if (edition === "penguin") {
         roughMap.needsUpdate = true;
         coatMap.needsUpdate = true;

@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "alianza",
+  "name": "Alianza Editorial [ES]",
+  "heightMm": 180,
+  "pages": { "min": 32, "max": 1200, "mmPerPage": 0.09, "minSpineMm": 10 },
+  "assets": {
+    "front": "front.png",
+    "back": "back.png",
+    "spine": "spine.png"
+  },
+  "back": {
+    "background": "#ffffff",
+    "bands": { "x": 0, "width": 0.29 },
+    "authorPhoto": { "x": 0.34, "y": 0.052, "size": 0.17, "maxHeight": 0.17 },
+    "copy": {
+      "y": 0.24,
+      "x": 0.34,
+      "width": 0.58,
+      "bottom": 0.82,
+      "gapAfterPhoto": 0.018,
+      "font": "Archivo, Arial, sans-serif",
+      "fontSize": 40,
+      "minFontSize": 24,
+      "lineHeight": 1.2,
+      "paragraphGap": 12,
+      "color": "#505050"
+    }
+  },
+  "front": {
+    "composition": "author-title-bands",
+    "layout": {
+      "topMargin": 0.052,
+      "bottomMargin": 0.052,
+      "gap": 0.014
+    },
+    "bandColors": {
+      "white": { "fill": "#ffffff", "ink": "#111111" },
+      "black": { "fill": "#111111", "ink": "#ffffff" }
+    },
+    "authorBand": {
+      "width": 1,
+      "heightControl": "authorBandHeight",
+      "paddingX": 40,
+      "paddingY": 12,
+      "maxLines": 2,
+      "font": "700 {size}px \"Archivo Author\", \"Alianza Cover\", Archivo, sans-serif",
+      "fontSize": 168,
+      "minFontSize": 46,
+      "brand": {
+        "name": "Alianza",
+        "suffix": " editorial",
+        "font": "\"Alianza Cover\", Archivo, sans-serif",
+        "fontSize": 50,
+        "rightPadding": 40,
+        "gap": 0
+      }
+    },
+    "titleBand": {
+      "width": 1,
+      "heightMode": "fit-text",
+      "paddingX": 48,
+      "paddingY": 24,
+      "lineHeight": 1.2,
+      "font": "400 {size}px \"Alianza Cover\", Archivo, sans-serif",
+      "fontSize": 58,
+      "minFontSize": 34,
+      "maxLines": 4,
+      "growTop": true,
+      "growBottom": true
+    },
+    "controls": [
+      {
+        "id": "bandPosition",
+        "label": "Band position",
+        "type": "choice",
+        "default": "top",
+        "options": [
+          { "value": "top", "label": "Top" },
+          { "value": "bottom", "label": "Bottom" }
+        ]
+      },
+      {
+        "id": "bandColor",
+        "label": "Band color",
+        "type": "choice",
+        "default": "white",
+        "options": [
+          { "value": "white", "label": "White" },
+          { "value": "black", "label": "Black" }
+        ]
+      },
+      {
+        "id": "bandY",
+        "label": "Band position Y",
+        "type": "range",
+        "min": 0.03,
+        "max": 0.95,
+        "step": 0.005,
+        "default": 0.052,
+        "format": "percent"
+      },
+      {
+        "id": "authorBandHeight",
+        "label": "Author band height",
+        "type": "range",
+        "min": 0.08,
+        "max": 0.18,
+        "step": 0.005,
+        "default": 0.08,
+        "format": "percent"
+      }
+    ]
+  },
+  "spine": {
+    "slices": { "leftEnd": 0.2, "rightStart": 0.8 },
+    "text": [
+      {
+        "field": "title",
+        "centerY": 0.86,
+        "maxLength": 0.38,
+        "fontSize": 48,
+        "minFontSize": 22,
+        "font": "400 {size}px \"Alianza Cover\", Archivo, sans-serif",
+        "weight": 400,
+        "color": "#111111",
+        "growDirection": "up",
+        "maxLines": 2
+      },
+      {
+        "field": "author",
+        "centerY": 0.2,
+        "maxLength": 0.27,
+        "fontSize": 104,
+        "minFontSize": 22,
+        "font": "700 {size}px \"Archivo Author\", \"Alianza Cover\", Archivo, sans-serif",
+        "weight": 700,
+        "color": "#111111",
+        "maxLines": 2,
+        "afterPortrait": true,
+        "gap": 48
+      }
+    ],
+    "authorPhoto": { "y": 0 }
+  },
+  "material": { "type": "matte-paper", "map": null }
+}
