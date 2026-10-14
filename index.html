@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portadas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400;62..125,500;62..125,700;62..125,900&family=Barlow:wght@400;500;600;700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="editions" role="group" aria-label="Editorial">
+    <button type="button" class="edition is-active" data-edition="alianza" aria-pressed="true">Alianza Editorial [ES]</button>
+    <button type="button" class="edition" data-edition="debolsillo" aria-pressed="false">Debolsillo [ES]</button>
+    <button type="button" class="edition" data-edition="penguin" aria-pressed="false">Penguin Clásicos [ES]</button>
+  </div>
+  <main class="workspace">
+    <section class="stage" aria-label="Cover preview">
+    <section class="panel" aria-label="Datos del libro">
+      <form id="form" autocomplete="off">
+        <label>
+          Author
+          <input id="author" name="author" type="text" value="Tolstói" maxlength="80">
+        </label>
+        <label>
+          Title
+          <textarea id="title" name="title" rows="2" maxlength="140">La muerte de Iván Ilich. Jadzhí Murat</textarea>
+        </label>
+        <label>
+          Page Number
+          <input id="pages" name="pages" type="number" inputmode="numeric" min="32" max="1200" step="1" value="320">
+        </label>
+        <div id="alianza-options">
+          <fieldset class="choice">
+            <legend>Band position</legend>
+            <div class="choice-row" id="position">
+              <button type="button" class="is-active" data-value="top" aria-pressed="true">Top</button>
+              <button type="button" data-value="bottom" aria-pressed="false">Bottom</button>
+            </div>
+          </fieldset>
+          <fieldset class="choice">
+            <legend>Band color</legend>
+            <div class="choice-row" id="scheme">
+              <button type="button" class="is-active" data-value="white" aria-pressed="true">White</button>
+              <button type="button" data-value="black" aria-pressed="false">Black</button>
+            </div>
+          </fieldset>
+        </div>
+        <div id="debolsillo-options" hidden>
+          <fieldset class="choice">
+            <legend>Collection</legend>
+            <div class="choice-row" id="series">
+              <button type="button" class="is-active" data-value="contemporanea" aria-pressed="true">Contemporary</button>
+              <button type="button" data-value="clasica" aria-pressed="false">Classic</button>
+            </div>
+          </fieldset>
+          <div class="swatches">
+            <div class="swatch-row" data-target="authorColor">
+              <span>Author</span>
+              <div class="swatch-dots">
+                <button type="button" class="is-on" data-color="#111111" aria-label="Negro"></button>
+                <button type="button" data-color="#ffffff" aria-label="Blanco"></button>
+                <button type="button" data-color="#8a8a8a" aria-label="Gris"></button>
+                <button type="button" data-color="#f3e6c8" aria-label="Crema"></button>
+                <button type="button" data-color="#e23b4a" aria-label="Rojo"></button>
+                <button type="button" data-color="#e87aa0" aria-label="Rosa"></button>
+                <button type="button" data-color="#8d2f2f" aria-label="Granate"></button>
+                <button type="button" data-color="#e07a2f" aria-label="Naranja"></button>
+                <button type="button" data-color="#e4c56a" aria-label="Dorado"></button>
+                <button type="button" data-color="#a56b32" aria-label="Ocre"></button>
+                <button type="button" data-color="#2f6fad" aria-label="Azul"></button>
+                <button type="button" data-color="#1d3c6e" aria-label="Azul oscuro"></button>
+                <button type="button" data-color="#3d8c5a" aria-label="Verde"></button>
+                <button type="button" data-color="#1f5c45" aria-label="Verde oscuro"></button>
+              </div>
+            </div>
+            <div class="swatch-row" data-target="titleColor">
+              <span>Title</span>
+              <div class="swatch-dots">
+                <button type="button" data-color="#111111" aria-label="Negro"></button>
+                <button type="button" data-color="#ffffff" aria-label="Blanco"></button>
+                <button type="button" data-color="#8a8a8a" aria-label="Gris"></button>
+                <button type="button" data-color="#f3e6c8" aria-label="Crema"></button>
+                <button type="button" class="is-on" data-color="#e23b4a" aria-label="Rojo"></button>
+                <button type="button" data-color="#e87aa0" aria-label="Rosa"></button>
+                <button type="button" data-color="#8d2f2f" aria-label="Granate"></button>
+                <button type="button" data-color="#e07a2f" aria-label="Naranja"></button>
+                <button type="button" data-color="#e4c56a" aria-label="Dorado"></button>
+                <button type="button" data-color="#a56b32" aria-label="Ocre"></button>
+                <button type="button" data-color="#2f6fad" aria-label="Azul"></button>
+                <button type="button" data-color="#1d3c6e" aria-label="Azul oscuro"></button>
+                <button type="button" data-color="#3d8c5a" aria-label="Verde"></button>
+                <button type="button" data-color="#1f5c45" aria-label="Verde oscuro"></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <label class="file">
+          Cover Image
+          <span class="picker">
+            <input id="photo" name="photo" type="file" accept="image/*">
+            <span class="picker-button">Pick Image</span>
+            <span id="photo-name"></span>
+          </span>
+        </label>
+        <label>
+          Cover Image Zoom
+          <input id="zoom" type="range" min="1" max="2.4" step="0.01" value="1" disabled>
+        </label>
+        <button type="button" id="reset" class="text-action">Reset framing</button>
+        <p class="hint">Drag the photo on the cover to frame it.</p>
+        <p id="font-note" class="font-note" hidden>
+          This cover uses Trade Gothic. Install Trade Gothic Regular and Trade Gothic Bold,
+          or leave those two files in the fonts folder.
+        </p>
+        <div class="actions">
+          <button type="button" id="download">Download PNG</button>
+          <button type="button" id="preview" aria-pressed="false">View in 3D</button>
+        </div>
+      </form>
+    </section>
+
+      <canvas id="cover" width="1600" height="2400">Cover</canvas>
+      <div id="book-view" hidden></div>
+      <div class="stage-balance" aria-hidden="true"></div>
+      <p class="caption">Alianza Editorial · 120 × 180 mm · 320 páginas</p>
+    </section>
+  </main>
+  <button type="button" id="edit-cover" hidden>Edit Cover</button>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
