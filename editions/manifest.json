@@ -1,5 +1,5 @@
 [
   { "id": "alianza", "name": "Alianza Editorial [ES]", "kind": "template", "config": "editions/alianza/edition.json" },
   { "id": "debolsillo", "name": "Debolsillo [ES]", "kind": "legacy" },
-  { "id": "penguin", "name": "Penguin Clásicos [ES]", "kind": "legacy" }
+  { "id": "penguin", "name": "Penguin Classics [ES]", "kind": "template", "config": "editions/penguin/edition.json" }
 ]

@@ -23,7 +23,16 @@ export async function loadEditionDefinitions() {
         await loadImage(new URL(filename, baseUrl).href),
       ])
     ));
-    return { ...entry, ...config, assets };
+    const materialMaps = Object.fromEntries(await Promise.all(
+      Object.entries(config.material?.maps || {}).map(async ([key, filename]) => [
+        key,
+        await loadImage(new URL(filename, baseUrl).href),
+      ])
+    ));
+    const material = config.material
+      ? { ...config.material, ...(Object.keys(materialMaps).length ? { maps: materialMaps } : {}) }
+      : null;
+    return { ...entry, ...config, assets, material };
   }));
   return definitions;
 }
@@ -48,6 +57,10 @@ export function drawTemplateBack(context, template, width, height, options = {})
     }
   }
 
+  if (config.quote) {
+    drawTemplateQuote(context, state.backQuote || "", width, height, config.quote, wrapText);
+  }
+
   const portrait = config.authorPhoto;
   let descriptionY = height * (config.copy?.y || 0.24);
   if (portrait && authorImage) {
@@ -58,6 +71,62 @@ export function drawTemplateBack(context, template, width, height, options = {})
     descriptionY = y + side + height * (config.copy?.gapAfterPhoto || 0.018);
   }
   drawTemplateBackCopy(context, copy, width, height, config.copy, descriptionY, wrapText);
+  if (config.tagline) {
+    drawTemplateTagline(context, config.tagline, width, height);
+  }
+}
+
+function drawTemplateTagline(context, config, width, height) {
+  const text = config.text || "";
+  if (!text) return;
+  const x = width * (config.x ?? 0.08);
+  const textWidth = width * (config.width ?? 0.84);
+  let size = config.fontSize || 28;
+  const minSize = config.minFontSize ?? 18;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.letterSpacing = config.letterSpacing || "0px";
+  while (size > minSize) {
+    context.font = fontFor(config, size);
+    if (context.measureText(text).width <= textWidth) break;
+    size -= 1;
+  }
+  context.font = fontFor(config, size);
+  context.fillStyle = config.color || "#f15a22";
+  context.fillText(text, x + textWidth / 2, height * (config.y ?? 0.68), textWidth);
+  context.letterSpacing = "0px";
+}
+
+function drawTemplateQuote(context, quote, width, height, config, wrapText) {
+  if (!quote || !wrapText) return;
+  const x = width * (config.x ?? 0.08);
+  const textWidth = width * (config.width ?? 0.84);
+  const top = height * (config.y ?? 0.04);
+  const bottom = height * (config.bottom ?? 0.16);
+  const maxLines = config.maxLines || 4;
+  let size = config.fontSize || 48;
+  let lines = [];
+  let lineHeight = size * (config.lineHeight || 1.3);
+  while (size > (config.minFontSize ?? 24)) {
+    context.font = fontFor(config, size);
+    lines = wrapText(context, quote.trim(), textWidth);
+    lineHeight = size * (config.lineHeight || 1.3);
+    if (lines.length <= maxLines && lines.length * lineHeight <= bottom - top) break;
+    size -= 1;
+  }
+  context.font = fontFor(config, size);
+  lines = wrapText(context, quote.trim(), textWidth).slice(0, maxLines);
+  lineHeight = size * (config.lineHeight || 1.3);
+  context.fillStyle = config.color || "#f15a22";
+  context.textAlign = "center";
+  context.textBaseline = "top";
+  context.letterSpacing = config.letterSpacing || "0px";
+  let y = top + Math.max(0, (bottom - top - lines.length * lineHeight) / 2);
+  for (const line of lines) {
+    context.fillText(line, x + textWidth / 2, y, textWidth);
+    y += lineHeight;
+  }
+  context.letterSpacing = "0px";
 }
 
 function imageSourceRect(image, frameW, frameH, state = {}) {
@@ -167,6 +236,9 @@ export function drawTemplateFront(context, { template, image, state, options, wi
   context.shadowBlur = 0;
   context.textAlign = "left";
   context.textBaseline = "top";
+  if (template.front.composition === "penguin-classics") {
+    return drawPenguinClassicsFront(context, { template, image, state, width, height, wrapText });
+  }
   if (image) {
     const source = imageSourceRect(image, width, height, state);
     context.drawImage(image, source.sx, source.sy, source.sw, source.sh, 0, 0, width, height);
@@ -288,6 +360,88 @@ export function drawTemplateFront(context, { template, image, state, options, wi
   };
 }
 
+function drawPenguinClassicsFront(context, { template, image, state, width, height, wrapText }) {
+  const config = template.front;
+  const photoHeight = height * (config.photoHeight ?? 0.697);
+  context.fillStyle = config.textBackground || "#111211";
+  context.fillRect(0, 0, width, height);
+  if (image) {
+    const source = imageSourceRect(image, width, photoHeight, state);
+    context.drawImage(image, source.sx, source.sy, source.sw, source.sh, 0, 0, width, photoHeight);
+  } else {
+    context.fillStyle = "#363432";
+    context.fillRect(0, 0, width, photoHeight);
+    context.fillStyle = "#e5e1da";
+    context.font = "400 36px Arial, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("Añade una foto", width / 2, photoHeight * 0.72);
+  }
+
+  // The Penguin front asset includes opaque black areas as well as the logo band.
+  // Paint it before the editable author/title so those areas cannot cover the text.
+  if (template.assets.front) context.drawImage(template.assets.front, 0, 0, width, height);
+
+  const authorConfig = config.author || {};
+  const titleConfig = config.title || {};
+  const textArea = config.textArea || { top: 0.805, bottom: 0.975, gap: 0.018 };
+  const maxWidth = width * (config.textWidth || 0.86);
+  const top = height * textArea.top;
+  const bottom = height * textArea.bottom;
+  const gap = height * (textArea.gap || 0.015);
+  let authorSize = authorConfig.fontSize || 66;
+  let titleSize = titleConfig.fontSize || 68;
+  let authorLines = [];
+  let titleLines = [];
+  let authorLineHeight = 0;
+  let titleLineHeight = 0;
+  let authorHeight = 0;
+  let titleHeight = 0;
+  function layoutText() {
+    context.letterSpacing = authorConfig.letterSpacing || "0px";
+    context.font = fontFor(authorConfig, authorSize);
+    const author = String(state.author || "Autor").trim().toLocaleUpperCase("es");
+    authorLines = wrapText(context, author, maxWidth).slice(0, authorConfig.maxLines || 2);
+    authorLineHeight = authorSize * (authorConfig.lineHeight || 1.3);
+    authorHeight = authorLines.length * authorLineHeight;
+    context.letterSpacing = titleConfig.letterSpacing || "0px";
+    context.font = fontFor(titleConfig, titleSize);
+    const title = String(state.title || "Título del libro").trim();
+    titleLines = wrapText(context, title, maxWidth).slice(0, titleConfig.maxLines || 3);
+    titleLineHeight = titleSize * (titleConfig.lineHeight || 1.25);
+    titleHeight = titleLines.length * titleLineHeight;
+    return authorHeight + gap + titleHeight;
+  }
+  let blockHeight = layoutText();
+  while (blockHeight > bottom - top
+    && (authorSize > (authorConfig.minFontSize || 32) || titleSize > (titleConfig.minFontSize || 32))) {
+    if (titleSize > (titleConfig.minFontSize || 32)) titleSize = Math.max(titleConfig.minFontSize || 32, titleSize - 2);
+    else authorSize = Math.max(authorConfig.minFontSize || 32, authorSize - 2);
+    blockHeight = layoutText();
+  }
+
+  let y = top + Math.max(0, (bottom - top - blockHeight) / 2);
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = authorConfig.color || "#f15a22";
+  context.letterSpacing = authorConfig.letterSpacing || "0px";
+  context.font = fontFor(authorConfig, authorSize);
+  for (const line of authorLines) {
+    context.fillText(line, width / 2, y + authorLineHeight / 2, maxWidth);
+    y += authorLineHeight;
+  }
+  y += gap;
+  context.fillStyle = titleConfig.color || "#f4f0e7";
+  context.letterSpacing = titleConfig.letterSpacing || "0px";
+  context.font = fontFor(titleConfig, titleSize);
+  for (const line of titleLines) {
+    context.fillText(line, width / 2, y + titleLineHeight / 2, maxWidth);
+    y += titleLineHeight;
+  }
+  context.letterSpacing = "0px";
+  return null;
+}
+
 export function drawTemplateSpine(context, { template, state, width, height, spineWidth, wrapText }) {
   const source = template.assets.spine;
   const targetWidth = Math.max(1, Math.round(spineWidth));
@@ -311,26 +465,37 @@ export function drawTemplateSpine(context, { template, state, width, height, spi
     drawSquarePortrait(context, state.authorImage, 0, height * (portraitConfig.y || 0), portraitSide);
   }
 
+  const textEnds = new Map();
   for (const item of template.spine.text || []) {
-    const value = String(state[item.field] || "").trim();
+    let value = String(state[item.field] || "").trim();
     if (!value) continue;
+    if (item.uppercase) value = value.toLocaleUpperCase("es");
+    if (item.singleLine) value = value.replace(/\s+/g, " ");
     const maxLength = height * item.maxLength;
     let fontSize = Math.min(item.fontSize, targetWidth * 0.48);
     const lines = [];
     do {
       context.font = fontFor(item, fontSize);
-      lines.splice(0, lines.length, ...wrapText(context, value, maxLength).slice(0, item.maxLines || 1));
+      const wrappedLines = item.singleLine ? [value] : wrapText(context, value, maxLength);
+      lines.splice(0, lines.length, ...wrappedLines.slice(0, item.maxLines || 1));
       if (lines.every((line) => context.measureText(line).width <= maxLength) || fontSize <= item.minFontSize) break;
       fontSize -= 2;
     } while (fontSize > item.minFontSize);
     context.font = fontFor(item, fontSize);
     context.fillStyle = item.color;
+    context.letterSpacing = item.letterSpacing || "0px";
     const growsUp = item.growDirection === "up";
-    context.textAlign = growsUp ? "left" : "center";
+    const growsDown = item.growDirection === "down";
+    context.textAlign = growsUp || growsDown ? "left" : "center";
     context.textBaseline = "middle";
     const lineGap = fontSize * 1.15;
     let centerY = height * item.centerY;
-    if (item.afterPortrait) {
+    if (growsDown && item.startAfter) {
+      centerY = (textEnds.get(item.startAfter) ?? height * (item.startY || 0))
+        + height * (item.gapY || 0);
+    } else if (growsDown && Number.isFinite(item.startY)) {
+      centerY = height * item.startY;
+    } else if (item.afterPortrait) {
       const startY = portraitConfig && state.authorImage
         ? height * (portraitConfig.y || 0) + targetWidth + (item.gap || 10)
         : item.gap || 10;
@@ -341,17 +506,27 @@ export function drawTemplateSpine(context, { template, state, width, height, spi
     }
     lines.forEach((line, index) => {
       context.save();
-      if (growsUp) {
+      if (growsDown) {
+        const crossOffset = ((lines.length - 1) / 2 - index) * lineGap;
+        context.translate(targetWidth / 2 + crossOffset, centerY);
+        context.rotate(Math.PI / 2);
+      } else if (growsUp) {
         const crossOffset = (index - (lines.length - 1) / 2) * lineGap;
         context.translate(targetWidth / 2 + crossOffset, centerY);
+        context.rotate(-Math.PI / 2);
       } else {
         context.translate(targetWidth / 2, centerY + (index - (lines.length - 1) / 2) * lineGap);
+        context.rotate(-Math.PI / 2);
       }
-      context.rotate(-Math.PI / 2);
       context.fillText(line, 0, 0, maxLength);
       context.restore();
     });
+    if (growsDown) {
+      const textLength = Math.max(0, ...lines.map((line) => context.measureText(line).width));
+      textEnds.set(item.field, centerY + textLength);
+    }
   }
+  context.letterSpacing = "0px";
 }
 
 function clamp(value, min, max) {

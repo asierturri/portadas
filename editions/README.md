@@ -12,7 +12,10 @@ La imagen frontal define la proporción. `heightMm` en el JSON define la altura 
 - `assets.front`: overlay PNG con transparencia. La foto personalizada se coloca debajo.
 - `assets.back`: diseño fijo de contraportada.
 - `assets.spine`: diseño base del lomo. `spine.slices.leftEnd` y `rightStart` delimitan la zona central que conserva su escala; solo se estiran los laterales al cambiar el grosor.
+- `material.maps.front`, `back` y `spine`: máscaras PNG para el acabado 3D. El azul asigna la zona brillante y el rojo la mate con textura; `material.gloss` y `material.matte` ajustan sus parámetros.
 - `front.composition: "author-title-bands"`: barras blancas/negras con autor, marca y título. El JSON define los controles y tipografía. El ancho de la banda del autor es fijo y su altura se puede ajustar con un rango definido por el JSON. La del título calcula su altura según las líneas necesarias.
+- `front.composition: "penguin-classics"`: foto en la zona superior, textos de autor y título en la zona inferior y una imagen PNG transparente encima para los elementos fijos, como la banda del logotipo. `front.author` y `front.title` definen fuentes, tamaños, colores y límites.
+- `back.quote`: cita destacada editable con tamaño, posición y color configurables; `back.copy` define la sinopsis editable debajo.
 - `back.bands`: posición horizontal y anchura de las dos bandas de contraportada. Sus alturas y posiciones verticales se sincronizan con las bandas del frontal, y muestran el recorte correspondiente de la foto de portada.
 - `back.copy`: disposición y tipografía de la sinopsis editable. `back.authorPhoto` activa el selector de retrato; la misma foto se convierte a blanco y negro en la contraportada y en el lomo.
 - `spine.authorPhoto`: coloca el retrato cuadrado arriba del lomo. El nombre del autor puede usar `afterPortrait` para quedar inmediatamente debajo de la imagen.

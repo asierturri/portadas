@@ -5,6 +5,10 @@ const EDITION_MM = {
   penguin: { w: 129, h: 198 },
 };
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function paperMaps(THREE, { laid }) {
   const n = 256;
   const height = new Float32Array(n * n);
@@ -121,6 +125,290 @@ function pageTextures(THREE) {
   return { foreMap, topMap, linesPerTile };
 }
 
+function createWearTexture(THREE, { mode = "edges", seed = 1 } = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 768;
+  const context = canvas.getContext("2d");
+  let randomState = seed >>> 0;
+  const random = () => {
+    randomState = (randomState * 1664525 + 1013904223) >>> 0;
+    return randomState / 0x100000000;
+  };
+
+  if (mode === "edges") {
+    const image = context.createImageData(canvas.width, canvas.height);
+    const hash = (x, y) => {
+      let value = Math.imul(x + seed, 374761393) + Math.imul(y - seed, 668265263);
+      value = Math.imul(value ^ (value >>> 13), 1274126177);
+      return ((value ^ (value >>> 16)) >>> 0) / 0xffffffff;
+    };
+    const palette = [
+      [229, 220, 198], // worn paper fibers
+      [196, 174, 137], // old exposed board
+      [128, 105, 79], // ingrained dirt
+      [91, 79, 67], // isolated dark grime
+    ];
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        const distanceX = Math.min(x, canvas.width - 1 - x);
+        const distanceY = Math.min(y, canvas.height - 1 - y);
+        const distance = Math.min(distanceX, distanceY);
+        const horizontal = distanceY < distanceX;
+        const along = horizontal ? x : y;
+        const coarse = 0.5 + 0.22 * Math.sin(along * 0.047 + seed) + 0.18 * Math.sin(along * 0.137 + seed * 0.37);
+        const corner = Math.max(0, 1 - distanceX / 42) * Math.max(0, 1 - distanceY / 42);
+        const edgeDepth = 2 + coarse * 10 + corner * (7 + 8 * hash(Math.floor(x / 8), Math.floor(y / 8)));
+        const grain = hash(Math.floor(x / 3), Math.floor(y / 3));
+        const scuff = Math.max(0, (edgeDepth - distance) / edgeDepth);
+        const patina = distance < 84 ? Math.exp(-distance / 23) * Math.max(0, grain - 0.42) * 0.4 : 0;
+        if (scuff <= 0 && patina <= 0) continue;
+
+        const paletteIndex = grain > 0.88 ? 3 : grain > 0.68 ? 2 : grain > 0.35 ? 1 : 0;
+        const [red, green, blue] = palette[paletteIndex];
+        const pixel = (y * canvas.width + x) * 4;
+        image.data[pixel] = red;
+        image.data[pixel + 1] = green;
+        image.data[pixel + 2] = blue;
+        image.data[pixel + 3] = Math.min(210, Math.round(scuff * (65 + grain * 110) + patina * 120));
+      }
+    }
+    context.putImageData(image, 0, 0);
+    // Small, irregular chips concentrated at the corners, rather than a clean border.
+    for (const [cx, cy, sx, sy] of [[0, 0, 1, 1], [512, 0, -1, 1], [0, 768, 1, -1], [512, 768, -1, -1]]) {
+      for (let i = 0; i < 10; i++) {
+        const x = cx + sx * random() * (12 + random() * 34);
+        const y = cy + sy * random() * (12 + random() * 42);
+        context.beginPath();
+        context.moveTo(x, y);
+        context.lineTo(x + sx * (3 + random() * 14), y + sy * (random() * 8));
+        context.lineTo(x + sx * (random() * 7), y + sy * (3 + random() * 18));
+        context.closePath();
+        context.fillStyle = random() > 0.45 ? "rgba(226, 215, 192, 0.72)" : "rgba(103, 84, 64, 0.56)";
+        context.fill();
+      }
+    }
+  } else {
+    context.lineCap = "round";
+      const crackCount = mode === "spine" ? 11 : 5;
+    for (let i = 0; i < crackCount; i++) {
+      const spine = mode === "spine";
+      let vertical = spine || random() > 0.35;
+      let x = spine ? 24 + random() * 464 : 40 + random() * 432;
+      let y = random() * canvas.height;
+      let direction = random() > 0.5 ? 1 : -1;
+      if (!spine && random() < 0.78) {
+        const edge = Math.floor(random() * 4);
+        if (edge === 0) {
+          x = random() * 18;
+          vertical = false;
+          direction = 1;
+        } else if (edge === 1) {
+          x = canvas.width - random() * 18;
+          vertical = false;
+          direction = -1;
+        } else if (edge === 2) {
+          y = random() * 18;
+          vertical = true;
+          direction = 1;
+        } else {
+          y = canvas.height - random() * 18;
+          vertical = true;
+          direction = -1;
+        }
+      }
+      const length = spine ? 80 + random() * 420 : 100 + random() * 380;
+      const points = [];
+      const steps = spine ? 9 : 11;
+      points.push([x, y]);
+      for (let step = 1; step <= steps; step++) {
+        if (vertical) {
+          x += (random() - 0.5) * (spine ? 13 : 18);
+          y += direction * length / steps;
+        } else {
+          x += direction * length / steps;
+          y += (random() - 0.5) * 16;
+        }
+        points.push([x, y]);
+      }
+      const drawPath = (offsetX, offsetY) => {
+        context.beginPath();
+        context.moveTo(points[0][0] + offsetX, points[0][1] + offsetY);
+        for (const [pointX, pointY] of points.slice(1)) context.lineTo(pointX + offsetX, pointY + offsetY);
+        context.stroke();
+      };
+      context.strokeStyle = spine ? "rgba(31, 27, 24, 0.56)" : "rgba(47, 39, 33, 0.42)";
+      context.lineWidth = spine ? 3 + random() * 3 : 2 + random() * 2;
+      drawPath(0, 0);
+      context.strokeStyle = "rgba(232, 220, 196, 0.72)";
+      context.lineWidth = spine ? 1.2 + random() * 1.2 : 1 + random();
+      drawPath(vertical ? 2 : 0, vertical ? 0 : 2);
+
+      // A few short branches make the fractures look torn instead of printed.
+      if (i % 2 === 0) {
+        const [branchX, branchY] = points[Math.floor(points.length * (0.35 + random() * 0.4))];
+        context.beginPath();
+        context.moveTo(branchX, branchY);
+        context.lineTo(branchX + (random() - 0.5) * 34, branchY + (random() - 0.5) * 62);
+        context.strokeStyle = "rgba(216, 204, 182, 0.58)";
+        context.lineWidth = 1.2 + random();
+        context.stroke();
+      }
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function setCurvedGeometry(deformation, age) {
+  const { geometry, basePositions, depth, maxBulge, hingeEdgeX, hingeWidth } = deformation;
+  const positions = geometry.attributes.position;
+  const bulge = maxBulge * age;
+  for (let i = 0; i < positions.count; i++) {
+    const offset = i * 3;
+    const x = basePositions[offset];
+    const z = basePositions[offset + 2];
+    const t = clamp((z + depth / 2) / depth, 0, 1);
+    const curve = Math.sin(Math.PI * t);
+    let hingeWeight = 1;
+    if (hingeWidth > 0) {
+      const acrossHinge = clamp((x - hingeEdgeX) / hingeWidth, 0, 1);
+      hingeWeight = 1 - acrossHinge * acrossHinge * (3 - 2 * acrossHinge);
+    }
+    positions.setXYZ(i, x + bulge * curve * hingeWeight, basePositions[offset + 1], z);
+  }
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+async function loadWearTextures(THREE, anisotropy) {
+  const loader = new THREE.TextureLoader();
+  const load = (name) => loader.loadAsync(new URL(`./textures/${name}`, import.meta.url).href);
+  const [back, front, spine] = await Promise.all([
+    load("wear_back.png"),
+    load("wear_front.png"),
+    load("wear_spine.png"),
+  ]);
+  for (const texture of [back, front, spine]) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = anisotropy;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+  }
+  return { back, front, spine };
+}
+
+function createSpineWearMap(THREE, source, targetAspect, anisotropy) {
+  const sourceWidth = source.naturalWidth || source.width;
+  const sourceHeight = source.naturalHeight || source.height;
+  const targetWidth = Math.max(1, Math.round(sourceHeight * targetAspect));
+  const fixedCenterStart = Math.round(sourceWidth * 0.2);
+  const fixedCenterEnd = Math.round(sourceWidth * 0.8);
+  const fixedCenterWidth = fixedCenterEnd - fixedCenterStart;
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = sourceHeight;
+  const context = canvas.getContext("2d");
+
+  if (targetWidth < fixedCenterWidth) {
+    const crop = (sourceWidth - targetWidth) / 2;
+    context.drawImage(source, crop, 0, targetWidth, sourceHeight, 0, 0, targetWidth, sourceHeight);
+  } else {
+    const sideWidth = (targetWidth - fixedCenterWidth) / 2;
+    context.drawImage(source, 0, 0, fixedCenterStart, sourceHeight, 0, 0, sideWidth, sourceHeight);
+    context.drawImage(
+      source,
+      fixedCenterStart, 0, fixedCenterWidth, sourceHeight,
+      sideWidth, 0, fixedCenterWidth, sourceHeight
+    );
+    context.drawImage(
+      source,
+      fixedCenterEnd, 0, sourceWidth - fixedCenterEnd, sourceHeight,
+      sideWidth + fixedCenterWidth, 0, sideWidth, sourceHeight
+    );
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = anisotropy;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
+}
+
+function makeFinishMaps(THREE, maskImage, normalImage, finish) {
+  const width = maskImage.naturalWidth || maskImage.width;
+  const height = maskImage.naturalHeight || maskImage.height;
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskContext = maskCanvas.getContext("2d", { willReadFrequently: true });
+  maskContext.drawImage(maskImage, 0, 0, width, height);
+  const mask = maskContext.getImageData(0, 0, width, height).data;
+  const normalContext = normalImage.getContext("2d", { willReadFrequently: true });
+  const normal = normalContext.getImageData(0, 0, normalImage.width, normalImage.height).data;
+  const roughnessCanvas = document.createElement("canvas");
+  const clearcoatCanvas = document.createElement("canvas");
+  const normalCanvas = document.createElement("canvas");
+  for (const canvas of [roughnessCanvas, clearcoatCanvas, normalCanvas]) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const roughness = roughnessCanvas.getContext("2d").createImageData(width, height);
+  const clearcoat = clearcoatCanvas.getContext("2d").createImageData(width, height);
+  const normals = normalCanvas.getContext("2d").createImageData(width, height);
+  const matteRoughness = Math.round((finish.matte?.roughness ?? 1) * 255);
+  const glossRoughness = Math.round((finish.gloss?.roughness ?? 0.62) * 255);
+  const normalWidth = normalImage.width;
+  const normalHeight = normalImage.height;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const sourcePixel = (y * width + x) * 4;
+      const isGloss = mask[sourcePixel + 2] > mask[sourcePixel];
+      const roughValue = isGloss ? glossRoughness : matteRoughness;
+      roughness.data[sourcePixel] = roughValue;
+      roughness.data[sourcePixel + 1] = roughValue;
+      roughness.data[sourcePixel + 2] = roughValue;
+      roughness.data[sourcePixel + 3] = 255;
+      clearcoat.data[sourcePixel] = isGloss ? 255 : 0;
+      clearcoat.data[sourcePixel + 1] = 255;
+      clearcoat.data[sourcePixel + 2] = 255;
+      clearcoat.data[sourcePixel + 3] = 255;
+      if (isGloss) {
+        normals.data[sourcePixel] = 128;
+        normals.data[sourcePixel + 1] = 128;
+        normals.data[sourcePixel + 2] = 255;
+      } else {
+        const normalPixel = ((y % normalHeight) * normalWidth + (x % normalWidth)) * 4;
+        normals.data[sourcePixel] = normal[normalPixel];
+        normals.data[sourcePixel + 1] = normal[normalPixel + 1];
+        normals.data[sourcePixel + 2] = normal[normalPixel + 2];
+      }
+      normals.data[sourcePixel + 3] = 255;
+    }
+  }
+
+  roughnessCanvas.getContext("2d").putImageData(roughness, 0, 0);
+  clearcoatCanvas.getContext("2d").putImageData(clearcoat, 0, 0);
+  normalCanvas.getContext("2d").putImageData(normals, 0, 0);
+  const makeTexture = (canvas) => {
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.NoColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    return texture;
+  };
+  return {
+    roughnessMap: makeTexture(roughnessCanvas),
+    clearcoatMap: makeTexture(clearcoatCanvas),
+    normalMap: makeTexture(normalCanvas),
+  };
+}
+
 export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, backCanvas, spineCanvas }) {
   const THREE = await import("three");
   const { OrbitControls } = await import("three/addons/controls/OrbitControls.js");
@@ -131,8 +419,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.toneMappingExposure = 1.05;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = false;
   view.appendChild(renderer.domElement);
   renderer.domElement.setAttribute("aria-label", "Libro en 3D");
 
@@ -157,28 +444,17 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   scene.environmentIntensity = 1;
   pmrem.dispose();
 
-  const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 50);
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 50);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.enablePan = false;
   controls.rotateSpeed = 0.75;
   controls.minDistance = 1.2;
   controls.maxDistance = 9;
-  controls.minPolarAngle = 0.35;
-  controls.maxPolarAngle = Math.PI / 2 + 0.2;
   controls.target.set(0, 0, 0);
 
   const key = new THREE.DirectionalLight(0xfff4e5, 2.6);
   key.position.set(2.4, 4.2, 3.2);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.camera.near = 0.2;
-  key.shadow.camera.far = 16;
-  key.shadow.camera.left = -3;
-  key.shadow.camera.right = 3;
-  key.shadow.camera.top = 3;
-  key.shadow.camera.bottom = -3;
-  key.shadow.bias = -0.0004;
   scene.add(key);
   const backKey = new THREE.DirectionalLight(0xfff2df, 2.2);
   backKey.position.set(-1.2, 2.2, -3.4);
@@ -192,44 +468,57 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   fill.position.set(-3.2, 1.6, 2.2);
   scene.add(fill);
 
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(30, 30),
-    new THREE.ShadowMaterial({ opacity: 0.2 })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  const coverMap = new THREE.CanvasTexture(coverCanvas);
-  coverMap.colorSpace = THREE.SRGBColorSpace;
-  coverMap.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-
-  const backMap = new THREE.CanvasTexture(backCanvas);
-  const spineMap = new THREE.CanvasTexture(spineCanvas);
-  for (const texture of [backMap, spineMap]) {
+  const surfaceAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const makeSurfaceTexture = (canvas) => {
+    const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = coverMap.anisotropy;
-  }
-
-  const frontSpineEdgeMap = coverMap.clone();
-  const backSpineEdgeMap = backMap.clone();
-  for (const texture of [frontSpineEdgeMap, backSpineEdgeMap]) {
+    texture.anisotropy = surfaceAnisotropy;
+    return texture;
+  };
+  const makeSpineEdgeTexture = (source) => {
+    const texture = source.clone();
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = coverMap.anisotropy;
-  }
+    texture.anisotropy = surfaceAnisotropy;
+    return texture;
+  };
+
+  let coverMap = makeSurfaceTexture(coverCanvas);
+  let backMap = makeSurfaceTexture(backCanvas);
+  let spineMap = makeSurfaceTexture(spineCanvas);
+  let frontSpineEdgeMap = makeSpineEdgeTexture(coverMap);
+  let backSpineEdgeMap = makeSpineEdgeTexture(backMap);
+  let surfaceTextureEdition = null;
 
   const roughMap = new THREE.CanvasTexture(roughCanvas);
   const coatMap = new THREE.CanvasTexture(coatCanvas);
   for (const texture of [roughMap, coatMap]) {
     texture.colorSpace = THREE.NoColorSpace;
-    texture.anisotropy = coverMap.anisotropy;
+    texture.anisotropy = surfaceAnisotropy;
   }
 
   const laid = paperMaps(THREE, { laid: true });
   const soft = paperMaps(THREE, { laid: false });
   const pagesTex = pageTextures(THREE);
+  const wearMaps = await loadWearTextures(THREE, surfaceAnisotropy);
+  const spineWearSource = wearMaps.spine.image;
+  wearMaps.spine.dispose();
+  const createWearMaterial = (map) => new THREE.MeshStandardMaterial({
+    map,
+    transparent: true,
+    opacity: 0,
+    metalness: 0,
+    roughness: 0.98,
+    envMapIntensity: 0.28,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    side: THREE.DoubleSide,
+  });
+  const frontWearMaterial = createWearMaterial(wearMaps.front);
+  const backWearMaterial = createWearMaterial(wearMaps.back);
+  const spineWearMaterial = createWearMaterial(null);
 
   const frontMat = new THREE.MeshPhysicalMaterial({
     map: coverMap,
@@ -257,6 +546,34 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   });
   const frontSpineEdgeMat = new THREE.MeshStandardMaterial({ map: frontSpineEdgeMap, roughness: 1 });
   const backSpineEdgeMat = new THREE.MeshStandardMaterial({ map: backSpineEdgeMap, roughness: 1 });
+  function refreshSurfaceTextures(edition) {
+    if (surfaceTextureEdition === edition) {
+      for (const texture of [coverMap, backMap, spineMap, frontSpineEdgeMap, backSpineEdgeMap]) {
+        texture.needsUpdate = true;
+      }
+      return;
+    }
+
+    for (const texture of [coverMap, backMap, spineMap, frontSpineEdgeMap, backSpineEdgeMap]) {
+      texture.dispose();
+    }
+    coverMap = makeSurfaceTexture(coverCanvas);
+    backMap = makeSurfaceTexture(backCanvas);
+    spineMap = makeSurfaceTexture(spineCanvas);
+    frontSpineEdgeMap = makeSpineEdgeTexture(coverMap);
+    backSpineEdgeMap = makeSpineEdgeTexture(backMap);
+
+    frontMat.map = coverMap;
+    backMat.map = backMap;
+    templateBackMat.map = backMap;
+    spineMat.map = spineMap;
+    frontSpineEdgeMat.map = frontSpineEdgeMap;
+    backSpineEdgeMat.map = backSpineEdgeMap;
+    for (const target of [frontMat, backMat, templateBackMat, spineMat, frontSpineEdgeMat, backSpineEdgeMat]) {
+      target.needsUpdate = true;
+    }
+    surfaceTextureEdition = edition;
+  }
   const stockMat = new THREE.MeshPhysicalMaterial({
     color: 0xf3efe6,
     metalness: 0,
@@ -279,8 +596,12 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
 
   let built = null;
   let appliedEdition = null;
+  let appliedFinishDefinition = null;
+  let mappedFinishMaps = null;
   let frameReady = false;
   let backMesh = null;
+  let currentWear = 0;
+  let spineDeformations = [];
   const pointer = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
   let pickMesh = null;
@@ -292,11 +613,51 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     }
     pickMesh = null;
     backMesh = null;
+    spineDeformations = [];
   }
 
-  function applyLook(edition, isTemplate = false) {
+  function setWear(value) {
+    currentWear = clamp(Number(value) || 0, 0, 100) / 100;
+    const edgeWear = Math.pow(currentWear, 0.76);
+    frontWearMaterial.opacity = edgeWear * 0.92;
+    backWearMaterial.opacity = edgeWear * 0.92;
+    spineWearMaterial.opacity = Math.pow(clamp((currentWear - 0.16) / 0.84, 0, 1), 1.12) * 0.88;
+    const curveAge = Math.pow(clamp((currentWear - 0.05) / 0.95, 0, 1), 1.35);
+    for (const deformation of spineDeformations) setCurvedGeometry(deformation, curveAge);
+  }
+
+  function applyMappedFinish(materialTarget, finishMap, finishConfig) {
+    if (!finishMap) return;
+    materialTarget.roughness = 1;
+    materialTarget.roughnessMap = finishMap.roughnessMap;
+    materialTarget.clearcoat = finishConfig.gloss?.clearcoat ?? 0.42;
+    materialTarget.clearcoatMap = finishMap.clearcoatMap;
+    materialTarget.clearcoatRoughness = finishConfig.gloss?.clearcoatRoughness ?? 0.48;
+    materialTarget.normalMap = finishMap.normalMap;
+    materialTarget.normalScale.set(finishConfig.matte?.normalScale ?? 0.12, finishConfig.matte?.normalScale ?? 0.12);
+    materialTarget.envMapIntensity = finishConfig.gloss?.envMapIntensity ?? 0.85;
+    materialTarget.needsUpdate = true;
+  }
+
+  function applyLook(edition, isTemplate = false, materialConfig = null) {
     if (edition === appliedEdition) return;
     appliedEdition = edition;
+    for (const target of [frontMat, backMat, spineMat]) {
+      target.roughnessMap = null;
+      target.clearcoat = 0;
+      target.clearcoatMap = null;
+      target.clearcoatRoughnessMap = null;
+      target.clearcoatRoughness = 1;
+      target.normalMap = null;
+    }
+    if (materialConfig?.type === "mapped-finish" && materialConfig !== appliedFinishDefinition) {
+      appliedFinishDefinition = materialConfig;
+      const normalSource = laid.normalMap.image;
+      mappedFinishMaps = Object.fromEntries(["front", "back", "spine"].map((surface) => {
+        const mask = materialConfig.maps?.[surface];
+        return [surface, mask ? makeFinishMaps(THREE, mask, normalSource, materialConfig) : null];
+      }));
+    }
     frontMat.map = coverMap;
     backMat.map = isTemplate || edition === "penguin" ? backMap : null;
     spineMat.map = isTemplate || edition === "penguin" ? spineMap : null;
@@ -358,10 +719,23 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     spineMat.color.set(isTemplate ? "#ffffff" : stockMat.color);
     backMat.roughness = stockMat.roughness;
     spineMat.roughness = stockMat.roughness;
+    if (edition === "penguin" && materialConfig?.type === "mapped-finish" && mappedFinishMaps) {
+      applyMappedFinish(frontMat, mappedFinishMaps.front, materialConfig);
+      applyMappedFinish(backMat, mappedFinishMaps.back, materialConfig);
+      applyMappedFinish(spineMat, mappedFinishMaps.spine, materialConfig);
+    }
     frontSpineEdgeMat.copy(frontMat);
     frontSpineEdgeMat.map = frontSpineEdgeMap;
     backSpineEdgeMat.copy(backMat);
     backSpineEdgeMat.map = backSpineEdgeMap;
+    if (edition === "penguin" && materialConfig?.type === "mapped-finish") {
+      for (const edgeMaterial of [frontSpineEdgeMat, backSpineEdgeMat]) {
+        edgeMaterial.roughness = 1;
+        edgeMaterial.roughnessMap = null;
+        edgeMaterial.normalMap = laid.normalMap;
+        edgeMaterial.normalScale.set(materialConfig.matte?.normalScale ?? 0.12, materialConfig.matte?.normalScale ?? 0.12);
+      }
+    }
     frontMat.needsUpdate = true;
     backMat.needsUpdate = true;
     spineMat.needsUpdate = true;
@@ -370,7 +744,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     stockMat.needsUpdate = true;
   }
 
-  function rebuild(edition, pages, dimensions = null) {
+  function rebuild(edition, pages, dimensions = null, preserveCamera = false) {
     disposeGroup();
     const size = dimensions || EDITION_MM[edition] || EDITION_MM.alianza;
     const pageMm = Math.max(dimensions?.minSpineMm || 10, pages * (dimensions?.mmPerPage || 0.09));
@@ -383,6 +757,8 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     const spineLip = 0.01 * MM;
     const gap = 0.02 * MM;
     const spineCoreWidth = Math.max(0, board - spineLip);
+    // Extend the cover faces over the inner spine core so no gap is exposed
+    // at the hinge. Keep the extension on the spine-facing edge.
     const coverWidth = width + spineCoreWidth;
     const coverShiftX = -spineCoreWidth / 2;
 
@@ -399,11 +775,9 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     const pageW = width;
     const pageH = height;
     const pagesMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(pageW, pageH, depth),
+      new THREE.BoxGeometry(pageW, pageH, depth, 40, 1, 40),
       [foreMat, pageHidden, topMat, topMat, pageHidden, pageHidden]
     );
-    pagesMesh.castShadow = true;
-    pagesMesh.receiveShadow = true;
     book.add(pagesMesh);
 
     const front = new THREE.Mesh(
@@ -412,9 +786,10 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     );
     front.position.x = coverShiftX;
     front.position.z = depth / 2 + board / 2 + gap;
-    front.castShadow = true;
-    front.receiveShadow = true;
     book.add(front);
+    const frontWear = new THREE.Mesh(new THREE.PlaneGeometry(coverWidth, height), frontWearMaterial);
+    frontWear.position.set(coverShiftX, 0, front.position.z + board / 2 + 0.00002);
+    book.add(frontWear);
 
     const back = new THREE.Mesh(
       new THREE.BoxGeometry(coverWidth, height, board),
@@ -422,31 +797,65 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     );
     back.position.x = coverShiftX;
     back.position.z = -(depth / 2 + board / 2 + gap);
-    back.castShadow = true;
-    back.receiveShadow = true;
     book.add(back);
     backMesh = back;
+    const backWear = new THREE.Mesh(new THREE.PlaneGeometry(coverWidth, height), backWearMaterial);
+    backWear.position.set(coverShiftX, 0, back.position.z - board / 2 - 0.00002);
+    backWear.rotation.y = Math.PI;
+    book.add(backWear);
 
     const spineDepth = depth + board * 2 + gap * 2;
     const spineCoreDepth = Math.max(0, spineDepth - board * 2);
     const spineOuterX = -width / 2 - board;
+    const previousSpineWearMap = spineWearMaterial.map;
+    spineWearMaterial.map = createSpineWearMap(THREE, spineWearSource, spineDepth / height, surfaceAnisotropy);
+    spineWearMaterial.needsUpdate = true;
+    previousSpineWearMap?.dispose();
+    spineDeformations.push({
+      geometry: pagesMesh.geometry,
+      basePositions: pagesMesh.geometry.attributes.position.array.slice(),
+      depth: spineDepth,
+      maxBulge: spineDepth * 0.045,
+      hingeEdgeX: -width / 2,
+      hingeWidth: Math.max(board * 12, width * 0.045),
+    });
     const spineCore = new THREE.Mesh(
-      new THREE.BoxGeometry(spineCoreWidth, height, spineCoreDepth),
+      new THREE.BoxGeometry(spineCoreWidth, height, spineCoreDepth, 1, 12, 48),
       [spineCoreMat, spineJoinMat, spineCoreMat, spineCoreMat, spineCoreMat, spineCoreMat]
     );
     spineCore.position.x = spineOuterX + spineLip + spineCoreWidth / 2;
-    spineCore.castShadow = true;
-    spineCore.receiveShadow = true;
     book.add(spineCore);
+    spineDeformations.push({
+      geometry: spineCore.geometry,
+      basePositions: spineCore.geometry.attributes.position.array.slice(),
+      depth: spineDepth,
+      maxBulge: spineDepth * 0.045,
+    });
 
     const spine = new THREE.Mesh(
-      new THREE.BoxGeometry(spineLip, height, spineDepth),
+      new THREE.BoxGeometry(spineLip, height, spineDepth, 1, 12, 48),
       [spineJoinMat, spineMat, stockMat, stockMat, frontSpineEdgeMat, backSpineEdgeMat]
     );
     spine.position.x = spineOuterX + spineLip / 2;
-    spine.castShadow = true;
-    spine.receiveShadow = true;
     book.add(spine);
+    spineDeformations.push({
+      geometry: spine.geometry,
+      basePositions: spine.geometry.attributes.position.array.slice(),
+      depth: spineDepth,
+      maxBulge: spineDepth * 0.045,
+    });
+
+    const spineWearGeometry = new THREE.PlaneGeometry(spineDepth, height, 64, 12);
+    spineWearGeometry.rotateY(-Math.PI / 2);
+    const spineWear = new THREE.Mesh(spineWearGeometry, spineWearMaterial);
+    spineWear.position.x = spineOuterX - 0.00002;
+    book.add(spineWear);
+    spineDeformations.push({
+      geometry: spineWearGeometry,
+      basePositions: spineWearGeometry.attributes.position.array.slice(),
+      depth: spineDepth,
+      maxBulge: spineDepth * 0.045,
+    });
 
     pickMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(width, height),
@@ -455,28 +864,44 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     pickMesh.position.z = front.position.z + board / 2 + 0.001;
     book.add(pickMesh);
 
-    ground.position.y = -height / 2 - 0.001;
     built = { edition, pages, width, height, depth: depth + board * 2 };
+    setWear(currentWear * 100);
 
-    placeCamera(false);
+    placeCamera(preserveCamera, preserveCamera);
   }
 
-  function placeCamera(keepDirection) {
+  function placeCamera(keepDirection, preserveDistance = false) {
     if (!built) return;
     const radius = 0.5 * Math.hypot(built.width, built.height, built.depth);
     const vFov = THREE.MathUtils.degToRad(camera.fov);
     const aspect = Math.max(camera.aspect || 1, 0.6);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
     const distance = Math.max(radius / Math.sin(vFov / 2), radius / Math.sin(hFov / 2)) * 1.72;
+    if (preserveDistance && frameReady) {
+      // A page-count change rebuilds the mesh, but must not move the camera or
+      // call controls.update(), which can consume pending wheel/damping input.
+      controls.minDistance = Math.min(controls.minDistance, radius * 1.15);
+      controls.maxDistance = Math.max(controls.maxDistance, distance * 3.2);
+      camera.near = Math.max(0.05, radius * 0.025);
+      camera.far = controls.maxDistance + radius * 1.5;
+      camera.updateProjectionMatrix();
+      return;
+    }
     controls.minDistance = radius * 1.15;
     controls.maxDistance = distance * 3.2;
+    // Keep the depth buffer focused on the book's actual zoom range. A tiny
+    // near plane combined with a distant far plane loses precision and causes
+    // the cover and page surfaces to flicker against each other when zoomed out.
+    camera.near = Math.max(0.05, radius * 0.025);
+    camera.far = controls.maxDistance + radius * 1.5;
+    camera.updateProjectionMatrix();
     controls.target.set(0, built.height * 0.02, 0);
     const offset = camera.position.clone().sub(controls.target);
     const direction = keepDirection && frameReady && offset.lengthSq() > 1e-6
       ? offset.normalize()
       : new THREE.Vector3(0.28, 0.05, 1).normalize();
     const next = keepDirection && frameReady
-      ? Math.max(offset.length(), distance)
+      ? (preserveDistance ? offset.length() : Math.max(offset.length(), distance))
       : distance;
     camera.position.copy(controls.target).add(direction.multiplyScalar(next));
     controls.update();
@@ -525,30 +950,38 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
       resize();
       placeCamera(false);
     },
-    sync({ edition, pages, template = false, dimensions = null }) {
+    resetRotation() {
+      if (!built) return;
+      controls.target.set(0, built.height * 0.02, 0);
+      const distance = Math.max(camera.position.distanceTo(controls.target), controls.minDistance);
+      const direction = new THREE.Vector3(0.28, 0.05, 1).normalize();
+      camera.position.copy(controls.target).add(direction.multiplyScalar(distance));
+      camera.lookAt(controls.target);
+      controls.update();
+    },
+    setWear,
+    sync({ edition, pages, template = false, dimensions = null, material = null, wear = currentWear * 100 }) {
       const nextPages = Math.round(pages);
+      const preserveCamera = Boolean(built && built.edition === edition);
       const size = dimensions ? {
         w: dimensions.widthMm,
         h: dimensions.heightMm,
         minSpineMm: dimensions.minSpineMm,
         mmPerPage: dimensions.mmPerPage,
       } : null;
+      refreshSurfaceTextures(edition);
       if (!built || built.edition !== edition || built.pages !== nextPages) {
-        rebuild(edition, nextPages, size);
+        rebuild(edition, nextPages, size, preserveCamera);
       }
-      applyLook(edition, template);
+      applyLook(edition, template, material);
       if (backMesh) {
-        backMesh.material[5] = template ? templateBackMat : backMat;
+        backMesh.material[5] = template && material?.type !== "mapped-finish" ? templateBackMat : backMat;
       }
-      coverMap.needsUpdate = true;
-      backMap.needsUpdate = true;
-      spineMap.needsUpdate = true;
-      frontSpineEdgeMap.needsUpdate = true;
-      backSpineEdgeMap.needsUpdate = true;
       if (edition === "penguin") {
         roughMap.needsUpdate = true;
         coatMap.needsUpdate = true;
       }
+      setWear(wear);
     },
   };
 }

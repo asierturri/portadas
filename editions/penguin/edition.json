@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "id": "penguin",
+  "name": "Penguin Classics [ES]",
+  "heightMm": 198,
+  "pages": { "min": 32, "max": 1200, "mmPerPage": 0.09, "minSpineMm": 10 },
+  "assets": {
+    "front": "front.png",
+    "back": "back.png",
+    "spine": "spine.png"
+  },
+  "front": {
+    "composition": "penguin-classics",
+    "photoHeight": 0.697,
+    "textBackground": "#111211",
+    "textArea": { "top": 0.747, "bottom": 1, "gap": 0.018 },
+    "author": {
+      "font": "700 {size}px Arial, sans-serif",
+      "fontSize": 66,
+      "minFontSize": 34,
+      "lineHeight": 1.3,
+      "maxLines": 2,
+      "color": "#f15a22",
+      "letterSpacing": "0.16em"
+    },
+    "title": {
+      "font": "italic {size}px 'Libre Baskerville', Georgia, serif",
+      "fontSize": 68,
+      "minFontSize": 34,
+      "lineHeight": 1.25,
+      "maxLines": 3,
+      "color": "#f4f0e7"
+    }
+  },
+  "back": {
+    "background": "#111211",
+    "tagline": {
+      "text": "The best books ever written",
+      "x": 0.08,
+      "y": 0.681,
+      "width": 0.84,
+      "font": "italic {size}px 'Libre Baskerville', Georgia, serif",
+      "fontSize": 36,
+      "minFontSize": 24,
+      "color": "#f15a22"
+    },
+    "quote": {
+      "x": 0.08,
+      "y": 0.045,
+      "width": 0.84,
+      "bottom": 0.16,
+      "font": "italic {size}px 'Libre Baskerville', Georgia, serif",
+      "fontSize": 48,
+      "minFontSize": 28,
+      "lineHeight": 1.35,
+      "maxLines": 4,
+      "color": "#f15a22"
+    },
+    "copy": {
+      "x": 0.08,
+      "y": 0.185,
+      "width": 0.84,
+      "bottom": 0.66,
+      "font": "Arial, sans-serif",
+      "fontSize": 40,
+      "minFontSize": 24,
+      "lineHeight": 1.2,
+      "paragraphGap": 24,
+      "color": "#f0efec"
+    }
+  },
+  "spine": {
+    "slices": { "leftEnd": 0.2, "rightStart": 0.8 },
+    "text": [
+      {
+        "field": "author",
+        "uppercase": true,
+        "startY": 0.05,
+        "growDirection": "down",
+        "singleLine": true,
+        "maxLength": 0.24,
+        "fontSize": 72,
+        "minFontSize": 24,
+        "font": "700 {size}px Arial, sans-serif",
+        "weight": 700,
+        "color": "#f15a22",
+        "maxLines": 2
+      },
+      {
+        "field": "title",
+        "startY": 0.05,
+        "startAfter": "author",
+        "gapY": 0.02,
+        "growDirection": "down",
+        "maxLength": 0.38,
+        "fontSize": 60,
+        "minFontSize": 22,
+        "font": "italic {size}px 'Libre Baskerville', Georgia, serif",
+        "weight": 400,
+        "color": "#f4f0e7",
+        "maxLines": 3
+      }
+    ]
+  },
+  "material": {
+    "type": "mapped-finish",
+    "maps": {
+      "front": "mat_front.png",
+      "back": "mat_back.png",
+      "spine": "mat_spine.png"
+    },
+    "matte": { "roughness": 1, "normalScale": 0.12 },
+    "gloss": { "roughness": 0.55, "clearcoat": 0.48, "clearcoatRoughness": 0.42, "envMapIntensity": 0.95 }
+  }
+}

@@ -21,24 +21,33 @@ for (const entry of manifest) {
     const config = JSON.parse(await readFile(configPath, "utf8"));
     if (config.id !== entry.id) throw new Error(`id de config (${config.id}) no coincide con el manifiesto`);
     if (!(config.heightMm > 0)) throw new Error("heightMm debe ser mayor que cero");
-    if (config.front?.composition !== "author-title-bands") {
+    const composition = config.front?.composition;
+    if (!["author-title-bands", "penguin-classics"].includes(composition)) {
       throw new Error(`composición no compatible: ${config.front?.composition}`);
     }
     for (const [surface, filename] of Object.entries(config.assets || {})) {
       await access(path.resolve(path.dirname(configPath), filename));
       if (!filename.toLowerCase().endsWith(".png")) throw new Error(`${surface} debe ser PNG`);
     }
-    const heightControl = config.front.controls?.find((control) => control.id === "authorBandHeight");
-    if (!heightControl || !(heightControl.min <= heightControl.default && heightControl.default <= heightControl.max)) {
-      throw new Error("authorBandHeight necesita min, default y max coherentes");
+    for (const [surface, filename] of Object.entries(config.material?.maps || {})) {
+      await access(path.resolve(path.dirname(configPath), filename));
+      if (!filename.toLowerCase().endsWith(".png")) throw new Error(`material.maps.${surface} debe ser PNG`);
     }
-    if (config.front.authorBand.heightControl !== heightControl.id || config.front.authorBand.width !== 1) {
-      throw new Error("La banda del autor debe tener ancho fijo y vincular el control de altura");
-    }
-    const spineAuthor = config.spine?.text?.find((item) => item.field === "author");
-    const spineTitle = config.spine?.text?.find((item) => item.field === "title");
-    if (spineAuthor?.font !== config.front.authorBand.font || spineTitle?.font !== config.front.titleBand.font) {
-      throw new Error("La tipografía del autor y título del lomo debe coincidir con la portada");
+    if (composition === "author-title-bands") {
+      const heightControl = config.front.controls?.find((control) => control.id === "authorBandHeight");
+      if (!heightControl || !(heightControl.min <= heightControl.default && heightControl.default <= heightControl.max)) {
+        throw new Error("authorBandHeight necesita min, default y max coherentes");
+      }
+      if (config.front.authorBand.heightControl !== heightControl.id || config.front.authorBand.width !== 1) {
+        throw new Error("La banda del autor debe tener ancho fijo y vincular el control de altura");
+      }
+      const spineAuthor = config.spine?.text?.find((item) => item.field === "author");
+      const spineTitle = config.spine?.text?.find((item) => item.field === "title");
+      if (spineAuthor?.font !== config.front.authorBand.font || spineTitle?.font !== config.front.titleBand.font) {
+        throw new Error("La tipografía del autor y título del lomo debe coincidir con la portada");
+      }
+    } else if (!config.front.author?.font || !config.front.title?.font || !config.back?.quote || !config.back?.copy) {
+      throw new Error("Penguin Classics necesita estilos de autor, título, cita y sinopsis");
     }
     if (config.back?.authorPhoto) {
       const { x, y, size, maxHeight } = config.back.authorPhoto;

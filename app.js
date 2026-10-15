@@ -1,10 +1,10 @@
-import { mountBook } from "./book.js?v=pages11";
+import { mountBook } from "./book.js?v=book-wear-16";
 import {
   drawTemplateBack,
   drawTemplateFront,
   drawTemplateSpine,
   loadEditionDefinitions,
-} from "./edition-templates.js";
+} from "./edition-templates.js?v=penguin-template-8";
 
 const DRAFT_DB = "portadas-editor";
 const DRAFT_STORE = "drafts";
@@ -60,10 +60,17 @@ const panXInput = document.querySelector("#pan-x");
 const panYInput = document.querySelector("#pan-y");
 const pagesInput = document.querySelector("#pages");
 const pagesSlider = document.querySelector("#pages-slider");
+const pages3dSlider = document.querySelector("#pages-3d-slider");
+const pages3dValue = document.querySelector("#pages-3d-value");
 const backQuoteInput = document.querySelector("#back-quote");
 const backCopyInput = document.querySelector("#back-copy");
+const templateBackQuoteInput = document.querySelector("#template-back-quote");
 const templateBackCopyInput = document.querySelector("#template-back-copy");
+const templateBackQuoteField = document.querySelector("#template-back-quote-field");
+const templateBackCopyField = document.querySelector("#template-back-copy-field");
 const view = document.querySelector("#book-view");
+const wearSlider = document.querySelector("#wear-slider");
+const wearValue = document.querySelector("#wear-value");
 
 const W = 1600;
 const H = 2400;
@@ -83,6 +90,7 @@ const state = {
   authorColor: "#111111",
   titleColor: "#e23b4a",
   pages: Number(pagesInput.value) || 320,
+  wear: 0,
   backQuote: backQuoteInput.value,
   backCopy: backCopyInput.value,
   templateOptions: { ...(defaultTemplateOptions[editionDefinitions[0]?.id] || {}) },
@@ -237,6 +245,7 @@ async function persistDraftNow() {
       authorColor: state.authorColor,
       titleColor: state.titleColor,
       pages: state.pages,
+      wear: state.wear,
       backQuote: state.backQuote,
       backCopy: state.backCopy,
     },
@@ -715,7 +724,14 @@ function syncBook() {
         minSpineMm: template.pages.minSpineMm,
       }
     : null;
-  viewer.sync({ edition: state.edition, pages: state.pages, template: Boolean(template), dimensions });
+  viewer.sync({
+    edition: state.edition,
+    pages: state.pages,
+    template: Boolean(template),
+    dimensions,
+    material: template?.material || null,
+    wear: state.wear,
+  });
 }
 
 function redraw() {
@@ -736,6 +752,7 @@ function redraw() {
       layout,
       image: state.image,
       state,
+      quote: state.backQuote,
       copy: state.backCopy,
       authorImage: state.authorImage,
       wrapText,
@@ -780,6 +797,13 @@ titleInput.addEventListener("input", () => {
 
 backQuoteInput.addEventListener("input", () => {
   state.backQuote = backQuoteInput.value;
+  templateBackQuoteInput.value = state.backQuote;
+  redraw();
+});
+
+templateBackQuoteInput.addEventListener("input", () => {
+  state.backQuote = templateBackQuoteInput.value;
+  backQuoteInput.value = state.backQuote;
   redraw();
 });
 
@@ -836,9 +860,15 @@ authorInput.value = state.author;
 titleInput.value = state.title;
 pagesInput.value = String(state.pages);
 pagesSlider.value = String(state.pages);
+pages3dSlider.value = String(state.pages);
+pages3dValue.value = String(state.pages);
+state.wear = clamp(Math.round(Number(state.wear) || 0), 0, 100);
+wearSlider.value = String(state.wear);
+wearValue.value = `${state.wear}%`;
 backQuoteInput.value = state.backQuote;
 backCopyInput.value = state.backCopy;
 templateBackCopyInput.value = state.backCopy;
+templateBackQuoteInput.value = state.backQuote;
 zoomInput.value = String(state.zoom);
 panXInput.value = String(state.panX * 100);
 panYInput.value = String(state.panY * 100);
@@ -996,12 +1026,17 @@ document.querySelectorAll(".edition[data-edition]").forEach((button) => {
       item.setAttribute("aria-pressed", String(active));
     });
     renderTemplateOptions(definition);
-    const hasBackCopy = definition?.kind === "template" && Boolean(definition.back?.copy);
-    templateBackOptions.hidden = !hasBackCopy;
+    const isTemplate = definition?.kind === "template";
+    const hasBackQuote = isTemplate && Boolean(definition.back?.quote);
+    const hasBackCopy = isTemplate && Boolean(definition.back?.copy);
+    templateBackOptions.hidden = !hasBackQuote && !hasBackCopy;
+    templateBackQuoteField.hidden = !hasBackQuote;
+    templateBackCopyField.hidden = !hasBackCopy;
     authorPhotoField.hidden = !definition?.back?.authorPhoto;
     templateBackCopyInput.value = state.backCopy;
+    templateBackQuoteInput.value = state.backQuote;
     debolsilloOptions.hidden = state.edition !== "debolsillo";
-    document.querySelector("#penguin-options").hidden = state.edition !== "penguin";
+    document.querySelector("#penguin-options").hidden = isTemplate || state.edition !== "penguin";
     document.querySelector(".hint").textContent = editionHint();
     caption.textContent = editionCaption();
     fontNote.hidden = state.edition !== "alianza" || coverFontReady();
@@ -1011,11 +1046,18 @@ document.querySelectorAll(".edition[data-edition]").forEach((button) => {
 
 renderTemplateOptions(editionById.get(state.edition));
 setCanvasForEdition(editionById.get(state.edition));
-templateBackOptions.hidden = !editionById.get(state.edition)?.back?.copy;
-authorPhotoField.hidden = !editionById.get(state.edition)?.back?.authorPhoto;
+const initialDefinition = editionById.get(state.edition);
+const initialIsTemplate = initialDefinition?.kind === "template";
+const initialHasQuote = initialIsTemplate && Boolean(initialDefinition.back?.quote);
+const initialHasCopy = initialIsTemplate && Boolean(initialDefinition.back?.copy);
+templateBackOptions.hidden = !initialHasQuote && !initialHasCopy;
+templateBackQuoteField.hidden = !initialHasQuote;
+templateBackCopyField.hidden = !initialHasCopy;
+authorPhotoField.hidden = !initialDefinition?.back?.authorPhoto;
 debolsilloOptions.hidden = state.edition !== "debolsillo";
-document.querySelector("#penguin-options").hidden = state.edition !== "penguin";
+document.querySelector("#penguin-options").hidden = initialIsTemplate || state.edition !== "penguin";
 templateBackCopyInput.value = state.backCopy;
+templateBackQuoteInput.value = state.backQuote;
 
 document.querySelectorAll(".swatch-dots button").forEach((button) => {
   button.style.setProperty("--swatch", button.dataset.color);
@@ -1167,6 +1209,14 @@ let dragText = false;
 let lastPoint = null;
 let previewing = false;
 const previewButton = document.querySelector("#preview");
+const resetRotationButton = document.querySelector("#reset-rotation");
+resetRotationButton.addEventListener("click", () => viewer?.resetRotation());
+wearSlider.addEventListener("input", () => {
+  state.wear = Number(wearSlider.value);
+  wearValue.value = `${state.wear}%`;
+  viewer?.setWear(state.wear);
+  scheduleDraftSave();
+});
 
 function canvasPoint(event) {
   const rect = canvas.getBoundingClientRect();
@@ -1268,6 +1318,8 @@ function commitPages(force) {
   state.pages = clamp(Math.round(value), 32, 1200);
   pagesInput.value = String(state.pages);
   pagesSlider.value = String(state.pages);
+  pages3dSlider.value = String(state.pages);
+  pages3dValue.value = String(state.pages);
   caption.textContent = editionCaption();
   redraw();
 }
@@ -1276,6 +1328,10 @@ pagesInput.addEventListener("input", () => commitPages(false));
 pagesInput.addEventListener("change", () => commitPages(true));
 pagesSlider.addEventListener("input", () => {
   pagesInput.value = pagesSlider.value;
+  commitPages(false);
+});
+pages3dSlider.addEventListener("input", () => {
+  pagesInput.value = pages3dSlider.value;
   commitPages(false);
 });
 

@@ -30,7 +30,11 @@
         </label>
         <div id="template-options" hidden></div>
         <div id="template-back-options" hidden>
-          <label>
+          <label id="template-back-quote-field" hidden>
+            Back 1 · Orange quote
+            <textarea id="template-back-quote" rows="3" maxlength="500"></textarea>
+          </label>
+          <label id="template-back-copy-field">
             Back cover text
             <textarea id="template-back-copy" rows="8" maxlength="1800"></textarea>
           </label>
@@ -153,7 +157,21 @@ Edited with an introduction and notes by JANET TODD</textarea>
         <canvas id="spine-preview" aria-label="Lomo" hidden></canvas>
         <canvas id="back-preview" aria-label="Contraportada" hidden></canvas>
       </div>
-      <div id="book-view" hidden></div>
+      <div id="book-view" hidden>
+        <button type="button" id="reset-rotation">Reset rotation</button>
+        <div id="book-controls">
+          <label class="book-control" for="pages-3d-slider">
+            <span>Page count</span>
+            <input id="pages-3d-slider" type="range" min="32" max="1200" step="1" value="320" aria-label="Número de páginas">
+            <output id="pages-3d-value" for="pages-3d-slider">320</output>
+          </label>
+          <label class="book-control" for="wear-slider">
+            <span>Book wear</span>
+            <input id="wear-slider" type="range" min="0" max="100" step="1" value="0" aria-label="Book wear">
+            <output id="wear-value" for="wear-slider">0%</output>
+          </label>
+        </div>
+      </div>
       <div class="stage-balance" aria-hidden="true"></div>
       <p class="caption">Alianza Editorial · 120 × 180 mm · 320 páginas</p>
     </section>
@@ -167,6 +185,6 @@ Edited with an introduction and notes by JANET TODD</textarea>
     }
   }
   </script>
-  <script type="module" src="app.js?v=draft-persistence-1"></script>
+  <script type="module" src="app.js?v=book-wear-16"></script>
 </body>
 </html>
