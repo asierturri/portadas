@@ -17,11 +17,11 @@
       <form id="form" autocomplete="off">
         <label>
           Author
-          <input id="author" name="author" type="text" value="Tolstói" maxlength="80">
+          <input id="author" name="author" type="text" value="Author" maxlength="80">
         </label>
         <label>
           Title
-          <textarea id="title" name="title" rows="2" maxlength="140">La muerte de Iván Ilich. Jadzhí Murat</textarea>
+          <textarea id="title" name="title" rows="2" maxlength="140">Title</textarea>
         </label>
         <label>
           Número de páginas
@@ -99,17 +99,11 @@
         <div id="penguin-options" hidden>
           <label>
             Back 1 · Orange quote
-            <textarea id="back-quote" rows="3" maxlength="500">'Behold Oroonoko, the most wretched, and abandoned by fortune of all the creation of the gods'</textarea>
+            <textarea id="back-quote" rows="3" maxlength="500"></textarea>
           </label>
           <label>
             Back 2 · Main text
-            <textarea id="back-copy" rows="9" maxlength="1800">Aphra Behn’s short novel Oroonoko tells the story of a noble African prince who is betrayed and sold into slavery. Using the author’s own experiences in Surinam, it depicts the tragedy of a man born to command brought to a position of abject powerlessness. Behn’s bawdy Restoration drama The Rover centres on the dissolute Cavalier Willmore, a follower of the exiled Charles II, and the attempts of two spirited women — Angellica Bianca, a courtesan, and Hellena, a cross-dressing virgin — to woo him. The other works collected here include poems, letters, prose and the play The Widow Ranter, the first drama to be set in the American colonies. Together they demonstrate the versatility and sophistication of one of the most innovative and wide-ranging authors of the seventeenth century.
-
-In her introduction, Janet Todd explores the social changes that have influenced Aphra Behn’s reputation over the centuries. This edition also contains notes on all the texts.
-
-‘All women together ought to let flowers fall upon the tomb of Aphra Behn, for it was she who earned them the right to speak their minds’ VIRGINIA WOOLF
-
-Edited with an introduction and notes by JANET TODD</textarea>
+            <textarea id="back-copy" rows="9" maxlength="1800">Put text here</textarea>
           </label>
         </div>
         <label class="file">
@@ -142,6 +136,7 @@ Edited with an introduction and notes by JANET TODD</textarea>
       <div class="panel-actions">
         <div class="actions">
           <button type="button" id="download">Download PNG</button>
+          <button type="button" id="reset-book">Reset</button>
           <button type="button" id="preview" aria-pressed="false">View in 3D</button>
         </div>
       </div>
@@ -159,6 +154,27 @@ Edited with an introduction and notes by JANET TODD</textarea>
       </div>
       <div id="book-view" hidden>
         <button type="button" id="reset-rotation">Reset rotation</button>
+        <div id="skybox-picker">
+          <label id="skybox-control" for="skybox-select">
+            <span>Skybox</span>
+            <select id="skybox-select" aria-label="Choose 3D background">
+              <option value="old-concrete">Old concrete walkway</option>
+              <option value="wine-shop">Wine shop interior</option>
+            </select>
+          </label>
+          <a id="skybox-attribution" href="https://www.vecteezy.com/members/jantsarik" target="_blank" rel="noopener noreferrer">Image credit: Ivan Tsyrkunovich · Vecteezy</a>
+          <label class="viewer-option" for="wood-table-toggle">
+            <input id="wood-table-toggle" type="checkbox">
+            <span>Wood table</span>
+          </label>
+          <label class="viewer-option" for="book-posture-select">
+            <span>Book posture</span>
+            <select id="book-posture-select" aria-label="Book posture">
+              <option value="standing">Standing</option>
+              <option value="lying">Lying down</option>
+            </select>
+          </label>
+        </div>
         <div id="book-controls">
           <label class="book-control" for="pages-3d-slider">
             <span>Page count</span>
@@ -185,6 +201,6 @@ Edited with an introduction and notes by JANET TODD</textarea>
     }
   }
   </script>
-  <script type="module" src="app.js?v=book-wear-16"></script>
+  <script type="module" src="app.js?v=book-cover-fade-47"></script>
 </body>
 </html>

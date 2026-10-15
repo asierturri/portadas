@@ -34,6 +34,13 @@
   },
   "back": {
     "background": "#111211",
+    "coverThumbnail": {
+      "labelLeft": 0.633,
+      "y": 0.83,
+      "height": 0.16,
+      "maxWidth": 0.2,
+      "gap": 0.018
+    },
     "tagline": {
       "text": "The best books ever written",
       "x": 0.08,

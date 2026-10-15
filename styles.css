@@ -465,6 +465,91 @@ button {
 
 #reset-rotation:hover { background: #46505c; }
 
+#skybox-picker {
+  position: absolute;
+  z-index: 3;
+  top: 16px;
+  left: 16px;
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100% - 190px));
+}
+
+#skybox-control {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 10px;
+  background: rgb(24 28 34 / 92%);
+  color: #f2f4f7;
+  font-size: 13px;
+  cursor: default;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+#skybox-control span {
+  flex: none;
+}
+
+#skybox-select,
+#book-posture-select {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--field);
+  color: #f2f4f7;
+  font: inherit;
+}
+
+.viewer-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 10px;
+  background: rgb(24 28 34 / 92%);
+  color: #f2f4f7;
+  font-size: 13px;
+  cursor: pointer;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.viewer-option span { flex: none; }
+
+.viewer-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #d5dbe3;
+}
+
+.viewer-option select {
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--field);
+  color: #f2f4f7;
+  font: inherit;
+}
+
+#skybox-attribution {
+  justify-self: start;
+  padding-left: 4px;
+  color: #f2f4f7;
+  font-size: 11px;
+  text-decoration: none;
+  text-shadow: 0 1px 4px rgb(0 0 0 / 75%);
+}
+
+#skybox-attribution:hover { text-decoration: underline; }
+
 #book-controls {
   position: absolute;
   z-index: 2;
@@ -557,11 +642,13 @@ body.is-preview .stage {
 body.is-preview #edit-cover {
   position: fixed;
   z-index: 11;
-  left: 22px;
-  bottom: 16px;
+  top: 16px;
+  left: 16px;
   flex: none;
   margin: 0;
 }
+
+body.is-preview #skybox-picker { top: 68px; }
 
 @media (max-width: 1100px) {
   .workspace {

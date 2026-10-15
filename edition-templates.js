@@ -74,6 +74,19 @@ export function drawTemplateBack(context, template, width, height, options = {})
   if (config.tagline) {
     drawTemplateTagline(context, config.tagline, width, height);
   }
+  if (config.coverThumbnail && image?.naturalWidth && image?.naturalHeight) {
+    const thumbnail = config.coverThumbnail;
+    const frameHeight = height * (thumbnail.height ?? 0.16);
+    const maxWidth = width * (thumbnail.maxWidth ?? 0.2);
+    const aspect = image.naturalWidth / image.naturalHeight;
+    const drawHeight = Math.min(frameHeight, maxWidth / aspect);
+    const drawWidth = drawHeight * aspect;
+    const labelLeft = width * (thumbnail.labelLeft ?? 0.633);
+    const gap = width * (thumbnail.gap ?? 0.018);
+    const x = labelLeft - gap - drawWidth;
+    const y = height * (thumbnail.y ?? 0.83) + (frameHeight - drawHeight) / 2;
+    context.drawImage(image, x, y, drawWidth, drawHeight);
+  }
 }
 
 function drawTemplateTagline(context, config, width, height) {

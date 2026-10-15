@@ -1,10 +1,10 @@
-import { mountBook } from "./book.js?v=book-wear-16";
+import { mountBook } from "./book.js?v=book-cover-fade-46";
 import {
   drawTemplateBack,
   drawTemplateFront,
   drawTemplateSpine,
   loadEditionDefinitions,
-} from "./edition-templates.js?v=penguin-template-8";
+} from "./edition-templates.js?v=penguin-template-9";
 
 const DRAFT_DB = "portadas-editor";
 const DRAFT_STORE = "drafts";
@@ -42,6 +42,19 @@ async function readPersistedDraft() {
 const editionDefinitions = await loadEditionDefinitions();
 const editionById = new Map(editionDefinitions.map((definition) => [definition.id, definition]));
 const persistedDraft = await readPersistedDraft();
+const persistedSettings = persistedDraft?.settings || {};
+const persistedEditionStates = persistedDraft?.editionStates && typeof persistedDraft.editionStates === "object"
+  ? persistedDraft.editionStates
+  : {};
+const defaultEditionId = editionDefinitions[0]?.id || "alianza";
+const initialEditionId = editionById.has(persistedSettings.edition) ? persistedSettings.edition : defaultEditionId;
+const initialEditionState = persistedEditionStates[initialEditionId] || {};
+const initialSkybox = ["old-concrete", "wine-shop"].includes(persistedSettings.skybox)
+  ? persistedSettings.skybox
+  : "old-concrete";
+const initialBookPosture = persistedSettings.bookPosture === "lying" ? "lying" : "standing";
+const initialWoodTable = Boolean(persistedSettings.woodTable);
+const editionSessionStates = new Map(Object.entries(persistedEditionStates));
 const defaultTemplateOptions = Object.fromEntries(editionDefinitions
   .filter((definition) => definition.kind === "template")
   .map((definition) => [definition.id, Object.fromEntries(
@@ -69,42 +82,49 @@ const templateBackCopyInput = document.querySelector("#template-back-copy");
 const templateBackQuoteField = document.querySelector("#template-back-quote-field");
 const templateBackCopyField = document.querySelector("#template-back-copy-field");
 const view = document.querySelector("#book-view");
+const skyboxSelect = document.querySelector("#skybox-select");
+const woodTableToggle = document.querySelector("#wood-table-toggle");
+const bookPostureSelect = document.querySelector("#book-posture-select");
 const wearSlider = document.querySelector("#wear-slider");
 const wearValue = document.querySelector("#wear-value");
 
 const W = 1600;
 const H = 2400;
+const DEFAULT_AUTHOR = "Author";
+const DEFAULT_TITLE = "Title";
+const DEFAULT_BACK_COPY = "Put text here";
 
 const state = {
-  author: authorInput.value,
-  title: titleInput.value,
+  author: initialEditionState.author ?? persistedSettings.author ?? authorInput.value,
+  title: initialEditionState.title ?? persistedSettings.title ?? titleInput.value,
   image: null,
   authorImage: null,
-  zoom: 1,
-  panX: 0,
-  panY: 0,
-  position: "top",
-  scheme: "white",
-  edition: editionDefinitions[0]?.id || "alianza",
-  series: "contemporanea",
-  authorColor: "#111111",
-  titleColor: "#e23b4a",
-  pages: Number(pagesInput.value) || 320,
-  wear: 0,
-  backQuote: backQuoteInput.value,
-  backCopy: backCopyInput.value,
+  zoom: initialEditionState.zoom ?? persistedSettings.zoom ?? 1,
+  panX: initialEditionState.panX ?? persistedSettings.panX ?? 0,
+  panY: initialEditionState.panY ?? persistedSettings.panY ?? 0,
+  position: initialEditionState.position ?? persistedSettings.position ?? "top",
+  scheme: initialEditionState.scheme ?? persistedSettings.scheme ?? "white",
+  edition: initialEditionId,
+  skybox: initialSkybox,
+  woodTable: initialWoodTable,
+  bookPosture: initialBookPosture,
+  series: initialEditionState.series ?? persistedSettings.series ?? "contemporanea",
+  authorColor: initialEditionState.authorColor ?? persistedSettings.authorColor ?? "#111111",
+  titleColor: initialEditionState.titleColor ?? persistedSettings.titleColor ?? "#e23b4a",
+  wear: initialEditionState.wear ?? persistedSettings.wear ?? 0,
+  backQuote: initialEditionState.backQuote ?? persistedSettings.backQuote ?? backQuoteInput.value,
+  backCopy: initialEditionState.backCopy ?? persistedSettings.backCopy ?? backCopyInput.value,
   templateOptions: { ...(defaultTemplateOptions[editionDefinitions[0]?.id] || {}) },
-  ...(persistedDraft?.settings || {}),
+  pages: initialEditionState.pages ?? persistedSettings.pages ?? (Number(pagesInput.value) || 320),
   image: null,
   authorImage: null,
   imageUrl: null,
   authorImageUrl: null,
-  imageBlob: persistedDraft?.coverImage || null,
-  authorImageBlob: persistedDraft?.authorImage || null,
-  imageName: persistedDraft?.coverImageName || "",
-  authorImageName: persistedDraft?.authorImageName || "",
+  imageBlob: initialEditionState.coverImage ?? persistedDraft?.coverImage ?? null,
+  authorImageBlob: initialEditionState.authorImage ?? persistedDraft?.authorImage ?? null,
+  imageName: initialEditionState.coverImageName ?? persistedDraft?.coverImageName ?? "",
+  authorImageName: initialEditionState.authorImageName ?? persistedDraft?.authorImageName ?? "",
 };
-if (!editionById.has(state.edition)) state.edition = editionDefinitions[0]?.id || "alianza";
 state.pages = clamp(Math.round(Number(state.pages) || 320), 32, 1200);
 
 function makeMapCanvas() {
@@ -217,15 +237,17 @@ const AUTHOR_FONT = '"Archivo Author", "Alianza Cover", Archivo, sans-serif';
 const COVER_FONT = '"Alianza Cover", Archivo, sans-serif';
 const DEBOLSILLO_FONT = "Arial";
 const TEXT_MARGIN = 88;
-const textPlace = { x: 86, y: Math.round(2400 * 0.24) };
+const textPlace = {
+  x: initialEditionState.textPlace?.x ?? persistedDraft?.textPlace?.x ?? 86,
+  y: initialEditionState.textPlace?.y ?? persistedDraft?.textPlace?.y ?? Math.round(2400 * 0.24),
+};
 const textBounds = { x: 86, y: 576, w: 700, h: 320 };
-if (Number.isFinite(persistedDraft?.textPlace?.x)) textPlace.x = persistedDraft.textPlace.x;
-if (Number.isFinite(persistedDraft?.textPlace?.y)) textPlace.y = persistedDraft.textPlace.y;
-let textPlacedByUser = Boolean(persistedDraft?.textPlacedByUser);
+let textPlacedByUser = Boolean(initialEditionState.textPlacedByUser ?? persistedDraft?.textPlacedByUser);
 let persistenceReady = false;
 let persistTimer = null;
 
 async function persistDraftNow() {
+  cacheActiveEditionState();
   const db = await openDraftDb().catch((error) => {
     console.warn("Could not save the cover draft.", error);
     return null;
@@ -233,30 +255,16 @@ async function persistDraftNow() {
   if (!db) return;
   const draft = {
     settings: {
-      author: state.author,
-      title: state.title,
-      zoom: state.zoom,
-      panX: state.panX,
-      panY: state.panY,
-      position: state.position,
-      scheme: state.scheme,
       edition: state.edition,
-      series: state.series,
-      authorColor: state.authorColor,
-      titleColor: state.titleColor,
-      pages: state.pages,
-      wear: state.wear,
-      backQuote: state.backQuote,
-      backCopy: state.backCopy,
+      skybox: state.skybox,
+      woodTable: state.woodTable,
+      bookPosture: state.bookPosture,
     },
     templateOptions: Object.fromEntries([...templateOptionStates].map(([id, values]) => [id, { ...values }])),
-    textPlace: { x: textPlace.x, y: textPlace.y },
-    textPlacedByUser,
-    selectedSurface,
-    coverImage: state.imageBlob || null,
-    coverImageName: state.imageName || "",
-    authorImage: state.authorImageBlob || null,
-    authorImageName: state.authorImageName || "",
+    editionStates: Object.fromEntries([...editionSessionStates].map(([id, values]) => {
+      const { image, imageUrl, authorImageElement, authorImageUrl, ...savedValues } = values;
+      return [id, savedValues];
+    })),
   };
   try {
     await new Promise((resolve, reject) => {
@@ -854,7 +862,81 @@ for (const [id, savedOptions] of Object.entries(persistedDraft?.templateOptions 
     templateOptionStates.set(id, { ...templateOptionStates.get(id), ...savedOptions });
   }
 }
+for (const [id, savedState] of editionSessionStates) {
+  if (templateOptionStates.has(id) && savedState?.templateOptions) {
+    templateOptionStates.set(id, { ...templateOptionStates.get(id), ...savedState.templateOptions });
+  }
+}
 state.templateOptions = templateOptionStates.get(state.edition) || state.templateOptions;
+
+function cacheActiveEditionState() {
+  const previous = editionSessionStates.get(state.edition) || {};
+  const {
+    coverImage,
+    coverImageName,
+    image,
+    imageUrl,
+    ...previousEditionSettings
+  } = previous;
+  editionSessionStates.set(state.edition, {
+    ...previousEditionSettings,
+    position: state.position,
+    scheme: state.scheme,
+    series: state.series,
+    authorColor: state.authorColor,
+    titleColor: state.titleColor,
+    zoom: state.zoom,
+    panX: state.panX,
+    panY: state.panY,
+    author: state.author,
+    title: state.title,
+    pages: state.pages,
+    wear: state.wear,
+    backQuote: state.backQuote,
+    backCopy: state.backCopy,
+    templateOptions: { ...(templateOptionStates.get(state.edition) || {}) },
+    textPlace: { x: textPlace.x, y: textPlace.y },
+    textPlacedByUser,
+    coverImage: state.imageBlob || null,
+    coverImageName: state.imageName || "",
+    image: state.image || null,
+    imageUrl: state.imageUrl || null,
+    authorImage: state.authorImageBlob || null,
+    authorImageName: state.authorImageName || "",
+    authorImageElement: state.authorImage || null,
+    authorImageUrl: state.authorImageUrl || null,
+  });
+}
+
+function applyEditionState(editionId) {
+  const saved = editionSessionStates.get(editionId) || {};
+  state.author = saved.author ?? DEFAULT_AUTHOR;
+  state.title = saved.title ?? DEFAULT_TITLE;
+  state.pages = clamp(Math.round(Number(saved.pages) || 320), 32, 1200);
+  state.wear = clamp(Math.round(Number(saved.wear) || 0), 0, 100);
+  state.position = saved.position ?? "top";
+  state.scheme = saved.scheme ?? "white";
+  state.series = saved.series ?? "contemporanea";
+  state.authorColor = saved.authorColor ?? "#111111";
+  state.titleColor = saved.titleColor ?? "#e23b4a";
+  state.zoom = saved.zoom ?? 1;
+  state.panX = saved.panX ?? 0;
+  state.panY = saved.panY ?? 0;
+  state.backQuote = saved.backQuote ?? "";
+  state.backCopy = saved.backCopy ?? DEFAULT_BACK_COPY;
+  state.templateOptions = templateOptionStates.get(editionId) || { ...(defaultTemplateOptions[editionId] || {}) };
+  textPlace.x = saved.textPlace?.x ?? 86;
+  textPlace.y = saved.textPlace?.y ?? Math.round(H * 0.24);
+  textPlacedByUser = Boolean(saved.textPlacedByUser);
+  state.image = saved.image || null;
+  state.imageUrl = saved.imageUrl || null;
+  state.imageBlob = saved.coverImage || null;
+  state.imageName = saved.coverImageName || "";
+  state.authorImage = saved.authorImageElement || null;
+  state.authorImageUrl = saved.authorImageUrl || null;
+  state.authorImageBlob = saved.authorImage || null;
+  state.authorImageName = saved.authorImageName || "";
+}
 
 authorInput.value = state.author;
 titleInput.value = state.title;
@@ -1001,6 +1083,7 @@ function editionHint() {
 }
 
 const editionButtons = document.querySelector(".editions");
+let editionChangeId = 0;
 for (const definition of editionDefinitions) {
   const button = document.createElement("button");
   button.type = "button";
@@ -1013,13 +1096,47 @@ for (const definition of editionDefinitions) {
 }
 
 document.querySelectorAll(".edition[data-edition]").forEach((button) => {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
+    const changeId = ++editionChangeId;
+    cacheActiveEditionState();
     state.edition = button.dataset.edition;
+    applyEditionState(state.edition);
     const definition = editionById.get(state.edition);
     setCanvasForEdition(definition);
-    if (definition?.kind === "template") {
-      state.templateOptions = templateOptionStates.get(definition.id);
-    }
+    await restoreSavedImages(state.edition);
+    if (changeId !== editionChangeId) return;
+    authorInput.value = state.author;
+    titleInput.value = state.title;
+    pagesInput.value = String(state.pages);
+    pagesSlider.value = String(state.pages);
+    pages3dSlider.value = String(state.pages);
+    pages3dValue.value = String(state.pages);
+    wearSlider.value = String(state.wear);
+    wearValue.value = `${state.wear}%`;
+    viewer?.setWear(state.wear);
+    zoomInput.value = String(state.zoom);
+    panXInput.value = String(state.panX * 100);
+    panYInput.value = String(state.panY * 100);
+    zoomInput.disabled = !state.imageBlob;
+    panXInput.disabled = !state.imageBlob;
+    panYInput.disabled = !state.imageBlob;
+    photoName.textContent = state.imageName;
+    photoName.title = state.imageName;
+    authorPhotoName.textContent = state.authorImageName;
+    authorPhotoName.title = state.authorImageName;
+    templateBackCopyInput.value = state.backCopy;
+    templateBackQuoteInput.value = state.backQuote;
+    backCopyInput.value = state.backCopy;
+    backQuoteInput.value = state.backQuote;
+    document.querySelectorAll("#series button").forEach((item) => {
+      const active = item.dataset.value === state.series;
+      item.classList.toggle("is-active", active);
+      item.setAttribute("aria-pressed", String(active));
+    });
+    document.querySelectorAll(".swatch-dots button").forEach((item) => {
+      const row = item.closest(".swatch-row");
+      item.classList.toggle("is-on", item.dataset.color === state[row.dataset.target]);
+    });
     document.querySelectorAll(".edition[data-edition]").forEach((item) => {
       const active = item === button;
       item.classList.toggle("is-active", active);
@@ -1134,33 +1251,68 @@ authorPhotoInput.addEventListener("change", () => {
   }).catch(() => URL.revokeObjectURL(url));
 });
 
-async function restoreSavedImages() {
-  if (state.imageBlob) {
-    const url = URL.createObjectURL(state.imageBlob);
+async function restoreSavedImages(editionId = state.edition) {
+  const isActive = editionId === state.edition;
+  const saved = editionSessionStates.get(editionId) || {};
+  let image = state.image;
+  let imageUrl = state.imageUrl;
+  let imageBlob = state.imageBlob;
+  let imageName = state.imageName;
+  let authorImage = isActive ? state.authorImage : saved.authorImageElement || null;
+  let authorImageUrl = isActive ? state.authorImageUrl : saved.authorImageUrl || null;
+  let authorImageBlob = isActive ? state.authorImageBlob : saved.authorImage || null;
+  let authorImageName = isActive ? state.authorImageName : saved.authorImageName || "";
+
+  if (imageBlob && !image) {
+    const url = URL.createObjectURL(imageBlob);
     try {
-      state.image = await loadCoverImage(url, false);
-      state.imageUrl = url;
-      canvas.classList.add("has-photo");
-      photoName.textContent = state.imageName;
-      photoName.title = state.imageName;
+      image = await loadCoverImage(url, false);
+      imageUrl = url;
     } catch {
       URL.revokeObjectURL(url);
-      state.imageBlob = null;
-      state.imageName = "";
+      imageBlob = null;
+      imageName = "";
     }
   }
-  if (state.authorImageBlob) {
-    const url = URL.createObjectURL(state.authorImageBlob);
+  if (authorImageBlob && !authorImage) {
+    const url = URL.createObjectURL(authorImageBlob);
     try {
-      state.authorImage = await loadCoverImage(url, false);
-      state.authorImageUrl = url;
-      authorPhotoName.textContent = state.authorImageName;
-      authorPhotoName.title = state.authorImageName;
+      authorImage = await loadCoverImage(url, false);
+      authorImageUrl = url;
     } catch {
       URL.revokeObjectURL(url);
-      state.authorImageBlob = null;
-      state.authorImageName = "";
+      authorImageBlob = null;
+      authorImageName = "";
     }
+  }
+
+  editionSessionStates.set(editionId, {
+    ...saved,
+    coverImage: imageBlob,
+    coverImageName: imageName,
+    image,
+    imageUrl,
+    authorImage: authorImageBlob,
+    authorImageName,
+    authorImageElement: authorImage,
+    authorImageUrl,
+  });
+  if (editionId === state.edition) {
+    Object.assign(state, {
+      image,
+      imageUrl,
+      imageBlob,
+      imageName,
+      authorImage,
+      authorImageUrl,
+      authorImageBlob,
+      authorImageName,
+    });
+    canvas.classList.toggle("has-photo", Boolean(image));
+    photoName.textContent = imageName;
+    photoName.title = imageName;
+    authorPhotoName.textContent = authorImageName;
+    authorPhotoName.title = authorImageName;
   }
 }
 
@@ -1211,6 +1363,24 @@ let previewing = false;
 const previewButton = document.querySelector("#preview");
 const resetRotationButton = document.querySelector("#reset-rotation");
 resetRotationButton.addEventListener("click", () => viewer?.resetRotation());
+skyboxSelect.value = state.skybox;
+skyboxSelect.addEventListener("change", () => {
+  state.skybox = skyboxSelect.value;
+  viewer?.setSkybox(state.skybox);
+  scheduleDraftSave();
+});
+woodTableToggle.checked = state.woodTable;
+woodTableToggle.addEventListener("change", () => {
+  state.woodTable = woodTableToggle.checked;
+  viewer?.setTable(state.woodTable);
+  scheduleDraftSave();
+});
+bookPostureSelect.value = state.bookPosture;
+bookPostureSelect.addEventListener("change", () => {
+  state.bookPosture = bookPostureSelect.value;
+  viewer?.setPosture(state.bookPosture);
+  scheduleDraftSave();
+});
 wearSlider.addEventListener("input", () => {
   state.wear = Number(wearSlider.value);
   wearValue.value = `${state.wear}%`;
@@ -1273,9 +1443,7 @@ canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
 
 const editCoverButton = document.querySelector("#edit-cover");
-let selectedSurface = ["front", "spine", "back"].includes(persistedDraft?.selectedSurface)
-  ? persistedDraft.selectedSurface
-  : "front";
+let selectedSurface = "front";
 
 function selectSurface(surface) {
   selectedSurface = surface;
@@ -1337,6 +1505,117 @@ pages3dSlider.addEventListener("input", () => {
 
 const fontNote = document.querySelector("#font-note");
 
+document.querySelector("#reset-book").addEventListener("click", () => {
+  const objectUrls = new Set([
+    state.imageUrl,
+    state.authorImageUrl,
+    ...[...editionSessionStates.values()].flatMap((saved) => [saved.imageUrl, saved.authorImageUrl]),
+  ]);
+  for (const url of objectUrls) {
+    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+  }
+
+  editionSessionStates.clear();
+  templateOptionStates.clear();
+  for (const [id, values] of Object.entries(defaultTemplateOptions)) {
+    templateOptionStates.set(id, { ...values });
+  }
+
+  state.author = DEFAULT_AUTHOR;
+  state.title = DEFAULT_TITLE;
+  state.edition = defaultEditionId;
+  state.woodTable = false;
+  state.bookPosture = "standing";
+  state.pages = 320;
+  state.wear = 0;
+  state.zoom = 1;
+  state.panX = 0;
+  state.panY = 0;
+  state.position = "top";
+  state.scheme = "white";
+  state.series = "contemporanea";
+  state.authorColor = "#111111";
+  state.titleColor = "#e23b4a";
+  state.backQuote = "";
+  state.backCopy = DEFAULT_BACK_COPY;
+  state.image = null;
+  state.imageUrl = null;
+  state.imageBlob = null;
+  state.imageName = "";
+  state.authorImage = null;
+  state.authorImageUrl = null;
+  state.authorImageBlob = null;
+  state.authorImageName = "";
+  state.templateOptions = templateOptionStates.get(state.edition) || {};
+  textPlace.x = 86;
+  textPlace.y = Math.round(H * 0.24);
+  textPlacedByUser = false;
+
+  authorInput.value = state.author;
+  titleInput.value = state.title;
+  pagesInput.value = String(state.pages);
+  pagesSlider.value = String(state.pages);
+  pages3dSlider.value = String(state.pages);
+  pages3dValue.value = String(state.pages);
+  wearSlider.value = "0";
+  wearValue.value = "0%";
+  woodTableToggle.checked = state.woodTable;
+  bookPostureSelect.value = state.bookPosture;
+  zoomInput.value = "1";
+  panXInput.value = "0";
+  panYInput.value = "0";
+  zoomInput.disabled = true;
+  panXInput.disabled = true;
+  panYInput.disabled = true;
+  photoInput.value = "";
+  authorPhotoInput.value = "";
+  photoName.textContent = "";
+  photoName.title = "";
+  authorPhotoName.textContent = "";
+  authorPhotoName.title = "";
+  canvas.classList.remove("has-photo");
+  backQuoteInput.value = state.backQuote;
+  backCopyInput.value = state.backCopy;
+  templateBackQuoteInput.value = state.backQuote;
+  templateBackCopyInput.value = state.backCopy;
+
+  const definition = editionById.get(state.edition);
+  const isTemplate = definition?.kind === "template";
+  const hasBackQuote = isTemplate && Boolean(definition.back?.quote);
+  const hasBackCopy = isTemplate && Boolean(definition.back?.copy);
+  setCanvasForEdition(definition);
+  renderTemplateOptions(definition);
+  templateBackOptions.hidden = !hasBackQuote && !hasBackCopy;
+  templateBackQuoteField.hidden = !hasBackQuote;
+  templateBackCopyField.hidden = !hasBackCopy;
+  authorPhotoField.hidden = !definition?.back?.authorPhoto;
+  debolsilloOptions.hidden = state.edition !== "debolsillo";
+  document.querySelector("#penguin-options").hidden = isTemplate || state.edition !== "penguin";
+  document.querySelectorAll(".edition[data-edition]").forEach((button) => {
+    const active = button.dataset.edition === state.edition;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelectorAll("#series button").forEach((button) => {
+    const active = button.dataset.value === state.series;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelectorAll(".swatch-dots button").forEach((button) => {
+    const row = button.closest(".swatch-row");
+    button.classList.toggle("is-on", button.dataset.color === state[row.dataset.target]);
+  });
+  fontNote.hidden = state.edition !== "alianza" || coverFontReady();
+  document.querySelector(".hint").textContent = editionHint();
+  caption.textContent = editionCaption();
+  selectSurface("front");
+  setPreview(false);
+  viewer?.setWear(0);
+  viewer?.setTable(state.woodTable);
+  viewer?.setPosture(state.bookPosture);
+  redraw();
+});
+
 function coverFontReady() {
   return document.fonts.check('400 16px "Alianza Cover"')
     && document.fonts.check('700 16px "Alianza Cover"');
@@ -1366,6 +1645,9 @@ redraw();
 
 mountBook({
   view,
+  skybox: state.skybox,
+  woodTable: state.woodTable,
+  posture: state.bookPosture,
   coverCanvas: canvas,
   roughCanvas,
   coatCanvas,

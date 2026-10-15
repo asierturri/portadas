@@ -92,28 +92,19 @@ function paperMaps(THREE, { laid }) {
   return { normalMap, roughMap };
 }
 
-function pageTextures(THREE) {
+function pageTextures(THREE, pageImage) {
   const linesPerTile = 48;
+  const foreCanvas = document.createElement("canvas");
+  foreCanvas.width = pageImage.height;
+  foreCanvas.height = pageImage.width;
+  const foreContext = foreCanvas.getContext("2d");
+  foreContext.translate(foreCanvas.width / 2, foreCanvas.height / 2);
+  foreContext.rotate(Math.PI / 2);
+  foreContext.drawImage(pageImage, -pageImage.width / 2, -pageImage.height / 2);
 
-  function paintEdge(alongX) {
-    const canvas = document.createElement("canvas");
-    const length = linesPerTile * 4;
-    canvas.width = alongX ? length : 8;
-    canvas.height = alongX ? 8 : length;
-    const g = canvas.getContext("2d");
-    g.fillStyle = "#f8f5ee";
-    g.fillRect(0, 0, canvas.width, canvas.height);
-    for (let i = 0; i < length; i += 4) {
-      const pageGroup = i % 16 === 0;
-      g.fillStyle = pageGroup ? "#cbbfae" : "#ded5c7";
-      if (alongX) g.fillRect(i, 0, pageGroup ? 2 : 1, 8);
-      else g.fillRect(0, i, 8, pageGroup ? 2 : 1);
-    }
-    return canvas;
-  }
-
-  const foreMap = new THREE.CanvasTexture(paintEdge(true));
-  const topMap = new THREE.CanvasTexture(paintEdge(false));
+  const foreMap = new THREE.CanvasTexture(foreCanvas);
+  const topMap = new THREE.Texture(pageImage);
+  topMap.needsUpdate = true;
   for (const texture of [foreMap, topMap]) {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
@@ -409,7 +400,17 @@ function makeFinishMaps(THREE, maskImage, normalImage, finish) {
   };
 }
 
-export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, backCanvas, spineCanvas }) {
+export async function mountBook({
+  view,
+  skybox = "old-concrete",
+  woodTable = false,
+  posture = "standing",
+  coverCanvas,
+  roughCanvas,
+  coatCanvas,
+  backCanvas,
+  spineCanvas,
+}) {
   const THREE = await import("three");
   const { OrbitControls } = await import("three/addons/controls/OrbitControls.js");
 
@@ -420,10 +421,52 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = false;
+  renderer.autoClear = false;
   view.appendChild(renderer.domElement);
   renderer.domElement.setAttribute("aria-label", "Libro en 3D");
 
   const scene = new THREE.Scene();
+  const skyboxScene = new THREE.Scene();
+  const skyboxBaseFov = 42;
+  const skyboxCamera = new THREE.PerspectiveCamera(skyboxBaseFov, 1, 0.05, 50);
+  const panoramaLoader = new THREE.TextureLoader();
+  const skyboxUrls = {
+    "old-concrete": new URL("./images/old-concrete-4096x2048.jpg", import.meta.url).href,
+    "wine-shop": new URL("./images/wine-shop-4096x2048.jpg", import.meta.url).href,
+  };
+  const skyboxTextures = new Map();
+  const skyboxLoads = new Map();
+  let activeSkybox = skyboxUrls[skybox] ? skybox : "old-concrete";
+  function loadSkybox(id) {
+    if (skyboxTextures.has(id)) return Promise.resolve(skyboxTextures.get(id));
+    if (skyboxLoads.has(id)) return skyboxLoads.get(id);
+    const request = panoramaLoader.loadAsync(skyboxUrls[id]).then((panorama) => {
+      panorama.mapping = THREE.EquirectangularReflectionMapping;
+      panorama.colorSpace = THREE.SRGBColorSpace;
+      panorama.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      skyboxTextures.set(id, panorama);
+      return panorama;
+    }).finally(() => skyboxLoads.delete(id));
+    skyboxLoads.set(id, request);
+    return request;
+  }
+  function setSkybox(id) {
+    if (!skyboxUrls[id]) return Promise.resolve(false);
+    activeSkybox = id;
+    applySkyboxLighting(id);
+    return loadSkybox(id).then((panorama) => {
+      if (activeSkybox === id) {
+        skyboxScene.background = panorama;
+        skyboxScene.backgroundBlurriness = 0;
+        skyboxScene.backgroundIntensity = 1;
+        scene.environment = panorama;
+      }
+      return true;
+    }).catch((error) => {
+      console.warn(`Could not load the 3D skybox: ${id}.`, error);
+      return false;
+    });
+  }
   const pmrem = new THREE.PMREMGenerator(renderer);
   const studio = new THREE.Scene();
   const softbox = new THREE.Mesh(
@@ -441,7 +484,6 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   fillPanel.lookAt(0, 0, 0);
   studio.add(fillPanel);
   scene.environment = pmrem.fromScene(studio, 0).texture;
-  scene.environmentIntensity = 1;
   pmrem.dispose();
 
   const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 50);
@@ -468,6 +510,35 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   fill.position.set(-3.2, 1.6, 2.2);
   scene.add(fill);
 
+  const skyboxLightingProfiles = {
+    "old-concrete": {
+      key: 0xffefda, keyIntensity: 2.0, back: 0xd5e4cb, backIntensity: 1.05,
+      sky: 0xd9e7d2, ground: 0x58564b, ambientIntensity: 0.87,
+      skim: 0xfff4e5, skimIntensity: 0.95, fill: 0xc9ddc4, fillIntensity: 0.78, environment: 0.36,
+    },
+    "wine-shop": {
+      key: 0xffd8a6, keyIntensity: 1.45, back: 0xc6d5a7, backIntensity: 0.85,
+      sky: 0xb9c69b, ground: 0x343026, ambientIntensity: 0.78,
+      skim: 0xffdfb4, skimIntensity: 0.7, fill: 0xc6d6aa, fillIntensity: 0.78, environment: 0.3,
+    },
+  };
+  function applySkyboxLighting(id) {
+    const profile = skyboxLightingProfiles[id] || skyboxLightingProfiles["old-concrete"];
+    key.color.setHex(profile.key);
+    key.intensity = profile.keyIntensity;
+    backKey.color.setHex(profile.back);
+    backKey.intensity = profile.backIntensity;
+    ambient.color.setHex(profile.sky);
+    ambient.groundColor.setHex(profile.ground);
+    ambient.intensity = profile.ambientIntensity;
+    skim.color.setHex(profile.skim);
+    skim.intensity = profile.skimIntensity;
+    fill.color.setHex(profile.fill);
+    fill.intensity = profile.fillIntensity;
+    scene.environmentIntensity = profile.environment;
+  }
+  setSkybox(activeSkybox);
+
   const surfaceAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const makeSurfaceTexture = (canvas) => {
     const texture = new THREE.CanvasTexture(canvas);
@@ -487,6 +558,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   let coverMap = makeSurfaceTexture(coverCanvas);
   let backMap = makeSurfaceTexture(backCanvas);
   let spineMap = makeSurfaceTexture(spineCanvas);
+  let spineMapSize = { width: spineCanvas.width, height: spineCanvas.height };
   let frontSpineEdgeMap = makeSpineEdgeTexture(coverMap);
   let backSpineEdgeMap = makeSpineEdgeTexture(backMap);
   let surfaceTextureEdition = null;
@@ -500,7 +572,12 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
 
   const laid = paperMaps(THREE, { laid: true });
   const soft = paperMaps(THREE, { laid: false });
-  const pagesTex = pageTextures(THREE);
+  const pageTexture = await new THREE.TextureLoader().loadAsync(
+    new URL("./images/book_pages.png", import.meta.url).href,
+  );
+  pageTexture.colorSpace = THREE.SRGBColorSpace;
+  const pagesTex = pageTextures(THREE, pageTexture.image);
+  pageTexture.dispose();
   const wearMaps = await loadWearTextures(THREE, surfaceAnisotropy);
   const spineWearSource = wearMaps.spine.image;
   wearMaps.spine.dispose();
@@ -539,6 +616,29 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     metalness: 0,
     roughness: 1,
   });
+  const wearFadeUniform = { value: 0 };
+  function addWearFade(material) {
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.wearFadeAmount = wearFadeUniform;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <common>",
+        "#include <common>\nuniform float wearFadeAmount;",
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        float wearLuminance = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+        vec3 fadedInk = mix(diffuseColor.rgb, vec3(wearLuminance), 0.78);
+        fadedInk = mix(fadedInk, vec3(0.68, 0.65, 0.58), 0.18);
+        diffuseColor.rgb = mix(diffuseColor.rgb, fadedInk, wearFadeAmount);`,
+      );
+    };
+    material.customProgramCacheKey = () => "cover-wear-fade-v1";
+    material.needsUpdate = true;
+  }
+  for (const material of [frontMat, backMat, templateBackMat, spineMat]) {
+    addWearFade(material);
+  }
   const spineCoreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const spineJoinMat = new THREE.MeshBasicMaterial({
     colorWrite: false,
@@ -548,6 +648,13 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   const backSpineEdgeMat = new THREE.MeshStandardMaterial({ map: backSpineEdgeMap, roughness: 1 });
   function refreshSurfaceTextures(edition) {
     if (surfaceTextureEdition === edition) {
+      if (spineMapSize.width !== spineCanvas.width || spineMapSize.height !== spineCanvas.height) {
+        spineMap.dispose();
+        spineMap = makeSurfaceTexture(spineCanvas);
+        spineMat.map = spineMap;
+        spineMapSize = { width: spineCanvas.width, height: spineCanvas.height };
+        spineMat.needsUpdate = true;
+      }
       for (const texture of [coverMap, backMap, spineMap, frontSpineEdgeMap, backSpineEdgeMap]) {
         texture.needsUpdate = true;
       }
@@ -560,6 +667,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     coverMap = makeSurfaceTexture(coverCanvas);
     backMap = makeSurfaceTexture(backCanvas);
     spineMap = makeSurfaceTexture(spineCanvas);
+    spineMapSize = { width: spineCanvas.width, height: spineCanvas.height };
     frontSpineEdgeMap = makeSpineEdgeTexture(coverMap);
     backSpineEdgeMap = makeSpineEdgeTexture(backMap);
 
@@ -595,6 +703,9 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   scene.add(book);
 
   let built = null;
+  let currentPosture = posture === "lying" ? "lying" : "standing";
+  let tableVisible = Boolean(woodTable);
+  book.rotation.x = currentPosture === "lying" ? -Math.PI / 2 : 0;
   let appliedEdition = null;
   let appliedFinishDefinition = null;
   let mappedFinishMaps = null;
@@ -605,6 +716,73 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   const pointer = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
   let pickMesh = null;
+
+  const TABLE_WIDTH = 3.6;
+  const TABLE_DEPTH = 4;
+  const TABLE_THICKNESS = 0.12;
+  const TABLE_LEG_HEIGHT = 0.86;
+  const TABLE_LEG_SIZE = 0.15;
+  const woodCanvas = document.createElement("canvas");
+  woodCanvas.width = 1024;
+  woodCanvas.height = 512;
+  const woodContext = woodCanvas.getContext("2d");
+  woodContext.fillStyle = "#9b6b42";
+  woodContext.fillRect(0, 0, woodCanvas.width, woodCanvas.height);
+  for (let line = 0; line < 300; line++) {
+    const y = (line / 300) * woodCanvas.height;
+    const shade = Math.random() > 0.52 ? 1 : -1;
+    woodContext.beginPath();
+    woodContext.moveTo(0, y);
+    for (let x = 0; x <= woodCanvas.width; x += 64) {
+      const wave = Math.sin(x * 0.012 + line * 0.23) * (1.5 + (line % 5));
+      woodContext.lineTo(x, y + wave);
+    }
+    woodContext.strokeStyle = shade > 0
+      ? `rgba(229, 181, 126, ${0.035 + Math.random() * 0.07})`
+      : `rgba(50, 27, 13, ${0.035 + Math.random() * 0.08})`;
+    woodContext.lineWidth = 0.5 + Math.random() * 2.2;
+    woodContext.stroke();
+  }
+  const woodTexture = new THREE.CanvasTexture(woodCanvas);
+  woodTexture.colorSpace = THREE.SRGBColorSpace;
+  woodTexture.wrapS = THREE.RepeatWrapping;
+  woodTexture.wrapT = THREE.RepeatWrapping;
+  woodTexture.repeat.set(1.4, 1.4);
+  woodTexture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  const tableMaterial = new THREE.MeshStandardMaterial({ map: woodTexture, roughness: 0.78 });
+  const tableGroup = new THREE.Group();
+  tableGroup.visible = tableVisible;
+  tableGroup.add(new THREE.Mesh(
+    new THREE.BoxGeometry(TABLE_WIDTH, TABLE_THICKNESS, TABLE_DEPTH),
+    tableMaterial,
+  ));
+  for (const x of [-1, 1]) {
+    for (const z of [-1, 1]) {
+      const leg = new THREE.Mesh(
+        new THREE.BoxGeometry(TABLE_LEG_SIZE, TABLE_LEG_HEIGHT, TABLE_LEG_SIZE),
+        tableMaterial,
+      );
+      leg.position.set(
+        x * (TABLE_WIDTH / 2 - TABLE_LEG_SIZE),
+        -(TABLE_THICKNESS / 2 + TABLE_LEG_HEIGHT / 2),
+        z * (TABLE_DEPTH / 2 - TABLE_LEG_SIZE),
+      );
+      tableGroup.add(leg);
+    }
+  }
+  scene.add(tableGroup);
+
+  function updateTablePose() {
+    if (!built) return;
+    const supportExtent = currentPosture === "lying" ? built.depth : built.height;
+    tableGroup.position.set(0, -supportExtent / 2 - TABLE_THICKNESS / 2, 0);
+  }
+
+  function defaultCameraDirection() {
+    return currentPosture === "lying"
+      ? new THREE.Vector3(0.2, 1.7, 1).normalize()
+      : new THREE.Vector3(0.28, tableVisible ? 0.18 : 0.05, 1).normalize();
+  }
 
   function disposeGroup() {
     for (const child of [...book.children]) {
@@ -619,6 +797,12 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   function setWear(value) {
     currentWear = clamp(Number(value) || 0, 0, 100) / 100;
     const edgeWear = Math.pow(currentWear, 0.76);
+    wearFadeUniform.value = Math.pow(currentWear, 2.2) * 0.86;
+    const yellowing = Math.pow(currentWear, 0.85) * 0.76;
+    const pageColor = new THREE.Color(0xf4efe4).lerp(new THREE.Color(0xc49b50), yellowing);
+    foreMat.color.copy(pageColor);
+    topMat.color.copy(pageColor);
+    pageHidden.color.copy(pageColor);
     frontWearMaterial.opacity = edgeWear * 0.92;
     backWearMaterial.opacity = edgeWear * 0.92;
     spineWearMaterial.opacity = Math.pow(clamp((currentWear - 0.16) / 0.84, 0, 1), 1.12) * 0.88;
@@ -815,7 +999,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
       geometry: pagesMesh.geometry,
       basePositions: pagesMesh.geometry.attributes.position.array.slice(),
       depth: spineDepth,
-      maxBulge: spineDepth * 0.045,
+      maxBulge: spineDepth * 0.09,
       hingeEdgeX: -width / 2,
       hingeWidth: Math.max(board * 12, width * 0.045),
     });
@@ -829,7 +1013,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
       geometry: spineCore.geometry,
       basePositions: spineCore.geometry.attributes.position.array.slice(),
       depth: spineDepth,
-      maxBulge: spineDepth * 0.045,
+      maxBulge: spineDepth * 0.09,
     });
 
     const spine = new THREE.Mesh(
@@ -842,7 +1026,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
       geometry: spine.geometry,
       basePositions: spine.geometry.attributes.position.array.slice(),
       depth: spineDepth,
-      maxBulge: spineDepth * 0.045,
+      maxBulge: spineDepth * 0.09,
     });
 
     const spineWearGeometry = new THREE.PlaneGeometry(spineDepth, height, 64, 12);
@@ -854,7 +1038,7 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
       geometry: spineWearGeometry,
       basePositions: spineWearGeometry.attributes.position.array.slice(),
       depth: spineDepth,
-      maxBulge: spineDepth * 0.045,
+      maxBulge: spineDepth * 0.09,
     });
 
     pickMesh = new THREE.Mesh(
@@ -865,18 +1049,29 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     book.add(pickMesh);
 
     built = { edition, pages, width, height, depth: depth + board * 2 };
+    book.rotation.x = currentPosture === "lying" ? -Math.PI / 2 : 0;
+    tableGroup.visible = tableVisible;
+    updateTablePose();
     setWear(currentWear * 100);
 
     placeCamera(preserveCamera, preserveCamera);
   }
 
-  function placeCamera(keepDirection, preserveDistance = false) {
-    if (!built) return;
+  function getCameraFitDistance() {
+    if (!built) return 0;
+    // Keep framing and background zoom tied to the book. Showing the table
+    // should never make the book smaller or change the skybox field of view.
     const radius = 0.5 * Math.hypot(built.width, built.height, built.depth);
     const vFov = THREE.MathUtils.degToRad(camera.fov);
     const aspect = Math.max(camera.aspect || 1, 0.6);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
-    const distance = Math.max(radius / Math.sin(vFov / 2), radius / Math.sin(hFov / 2)) * 1.72;
+    return Math.max(radius / Math.sin(vFov / 2), radius / Math.sin(hFov / 2)) * 1.72;
+  }
+
+  function placeCamera(keepDirection, preserveDistance = false) {
+    if (!built) return;
+    const radius = 0.5 * Math.hypot(built.width, built.height, built.depth);
+    const distance = getCameraFitDistance();
     if (preserveDistance && frameReady) {
       // A page-count change rebuilds the mesh, but must not move the camera or
       // call controls.update(), which can consume pending wheel/damping input.
@@ -895,17 +1090,27 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     camera.near = Math.max(0.05, radius * 0.025);
     camera.far = controls.maxDistance + radius * 1.5;
     camera.updateProjectionMatrix();
-    controls.target.set(0, built.height * 0.02, 0);
+    controls.target.set(0, currentPosture === "lying" ? 0 : built.height * 0.02, 0);
     const offset = camera.position.clone().sub(controls.target);
     const direction = keepDirection && frameReady && offset.lengthSq() > 1e-6
       ? offset.normalize()
-      : new THREE.Vector3(0.28, 0.05, 1).normalize();
-    const next = keepDirection && frameReady
-      ? (preserveDistance ? offset.length() : Math.max(offset.length(), distance))
-      : distance;
+      : defaultCameraDirection();
+    const next = keepDirection && frameReady ? Math.max(offset.length(), distance) : distance;
     camera.position.copy(controls.target).add(direction.multiplyScalar(next));
     controls.update();
     frameReady = true;
+  }
+
+  function setTable(enabled) {
+    tableVisible = Boolean(enabled);
+    tableGroup.visible = tableVisible;
+    updateTablePose();
+  }
+
+  function setPosture(value) {
+    currentPosture = value === "lying" ? "lying" : "standing";
+    book.rotation.x = currentPosture === "lying" ? -Math.PI / 2 : 0;
+    updateTablePose();
   }
 
   function resize() {
@@ -916,6 +1121,8 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
     renderer.setSize(Math.floor(width * dpr), Math.floor(height * dpr), false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    skyboxCamera.aspect = width / height;
+    skyboxCamera.updateProjectionMatrix();
     placeCamera(true);
   }
 
@@ -925,6 +1132,19 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
 
   renderer.setAnimationLoop(() => {
     controls.update();
+    const fitDistance = getCameraFitDistance();
+    if (fitDistance > 0) {
+      const zoomRatio = fitDistance / Math.max(camera.position.distanceTo(controls.target), 0.001);
+      const backgroundFov = clamp(skyboxBaseFov / Math.pow(zoomRatio, 0.35), 26, 58);
+      if (Math.abs(backgroundFov - skyboxCamera.fov) > 0.01) {
+        skyboxCamera.fov = backgroundFov;
+        skyboxCamera.updateProjectionMatrix();
+      }
+    }
+    skyboxCamera.quaternion.copy(camera.quaternion);
+    renderer.clear();
+    renderer.render(skyboxScene, skyboxCamera);
+    renderer.clearDepth();
     renderer.render(scene, camera);
   });
 
@@ -946,15 +1166,18 @@ export async function mountBook({ view, coverCanvas, roughCanvas, coatCanvas, ba
   return {
     dom: renderer.domElement,
     resize,
+    setSkybox,
+    setTable,
+    setPosture,
     fit() {
       resize();
       placeCamera(false);
     },
     resetRotation() {
       if (!built) return;
-      controls.target.set(0, built.height * 0.02, 0);
+      controls.target.set(0, currentPosture === "lying" ? 0 : built.height * 0.02, 0);
       const distance = Math.max(camera.position.distanceTo(controls.target), controls.minDistance);
-      const direction = new THREE.Vector3(0.28, 0.05, 1).normalize();
+      const direction = defaultCameraDirection();
       camera.position.copy(controls.target).add(direction.multiplyScalar(distance));
       camera.lookAt(controls.target);
       controls.update();
