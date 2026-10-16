@@ -233,7 +233,7 @@ function imageSourceRect(img, frameW, frameH, zoom, panX, panY) {
 
 const AUTHOR_FONT = '"Archivo Author", "Alianza Cover", Archivo, sans-serif';
 const COVER_FONT = '"Alianza Cover", Archivo, sans-serif';
-const DEBOLSILLO_FONT = "Arial";
+const DEBOLSILLO_FONT = '"Debolsillo Cover", sans-serif';
 const TEXT_MARGIN = 88;
 const textPlace = {
   x: initialEditionState.textPlace?.x ?? persistedDraft?.textPlace?.x ?? 86,
@@ -1336,7 +1336,36 @@ document.querySelector("#reset").addEventListener("click", () => {
   redraw();
 });
 
-document.querySelector("#download").addEventListener("click", () => {
+const exportStatus = document.createElement("p");
+exportStatus.className = "export-status";
+exportStatus.setAttribute("role", "status");
+exportStatus.hidden = true;
+document.querySelector(".panel-actions").append(exportStatus);
+
+function previewExport(blob) {
+  const url = URL.createObjectURL(blob);
+  const dialog = document.createElement("dialog");
+  dialog.className = "export-preview";
+  const instructions = document.createElement("p");
+  instructions.textContent = "Mantén pulsada la imagen para guardarla en Fotos.";
+  const image = document.createElement("img");
+  image.src = url;
+  image.alt = "Portada exportada en PNG";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.textContent = "Cerrar";
+  close.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => {
+    URL.revokeObjectURL(url);
+    dialog.remove();
+  }, { once: true });
+  dialog.append(instructions, image, close);
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+document.querySelector("#download").addEventListener("click", async () => {
+  exportStatus.hidden = true;
   const author = (state.author.trim() || "portada").toLocaleLowerCase("es");
   const title = (state.title.trim() || "alianza").toLocaleLowerCase("es");
   const slug = `${author}-${title}`
@@ -1344,10 +1373,36 @@ document.querySelector("#download").addEventListener("click", () => {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/gi, "-")
     .replace(/^-|-$/g, "");
-  const link = document.createElement("a");
-  link.href = canvas.toDataURL("image/png");
-  link.download = `${slug || "portada"}.png`;
-  link.click();
+  try {
+    // Encode synchronously so iOS still sees sharing as part of the tap.
+    const encoded = canvas.toDataURL("image/png").split(",")[1];
+    const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+    const file = new File([bytes], `${slug || "portada"}.png`, { type: "image/png" });
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isIOS && navigator.share && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+      } catch (error) {
+        if (error.name !== "AbortError") previewExport(file);
+      }
+    } else if (isIOS) {
+      previewExport(file);
+    } else {
+      const url = URL.createObjectURL(file);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.name;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+  } catch (error) {
+    console.error("PNG export failed", error);
+    exportStatus.textContent = "No se ha podido exportar la imagen. Vuelve a intentarlo.";
+    exportStatus.hidden = false;
+  }
 });
 
 let dragging = false;
@@ -1438,6 +1493,11 @@ canvas.addEventListener("pointercancel", endDrag);
 
 const editCoverButton = document.querySelector("#edit-cover");
 const editorPanel = document.querySelector(".panel");
+const editorForm = document.querySelector("#form");
+new ResizeObserver(() => {
+  const scrollbarWidth = editorForm.offsetWidth - editorForm.clientWidth;
+  editorPanel.style.setProperty("--form-scrollbar", `${scrollbarWidth}px`);
+}).observe(editorForm);
 const editionMenu = document.querySelector("#edition-menu");
 const openEditorButton = document.querySelector("#open-editor");
 const openSettingsButton = document.querySelector("#open-settings");
@@ -1466,6 +1526,7 @@ window.addEventListener("resize", syncSurfaceHeight);
 const skyboxPicker = document.querySelector("#skybox-picker");
 const advancedOptions = document.createElement("details");
 advancedOptions.className = "advanced-options";
+advancedOptions.setAttribute("aria-label", "Editorial-specific settings");
 const advancedSummary = document.createElement("summary");
 advancedSummary.textContent = "More options";
 advancedOptions.append(advancedSummary);
@@ -1474,8 +1535,7 @@ for (const element of [
   document.querySelector("#template-back-options"),
   document.querySelector("#debolsillo-options"),
   document.querySelector("#penguin-options"),
-  panXInput.closest("label"), panYInput.closest("label"),
-  document.querySelector("#reset"), document.querySelector("#font-note"),
+  document.querySelector("#font-note"),
 ]) advancedOptions.append(element);
 document.querySelector("#form").append(advancedOptions);
 // Keep the original controls and listeners when moving them between layouts.
@@ -1508,7 +1568,7 @@ function syncResponsiveLayout() {
   skyboxPicker.inert = mobileLayout.matches && !document.body.classList.contains("settings-open");
 }
 function syncEditionMenu() {
-  editionMenu.textContent = `+ ${editionById.get(state.edition)?.name || "Editorial"}`;
+  editionMenu.textContent = editionById.get(state.edition)?.name || "Editorial";
 }
 editionButtons.addEventListener("click", (event) => {
   if (!event.target.closest("[data-edition]")) return;
@@ -1716,6 +1776,10 @@ async function loadAuthorFace() {
 }
 
 document.fonts.ready.then(async () => {
+  await Promise.all([
+    document.fonts.load('400 30px "Debolsillo Cover"'),
+    document.fonts.load('700 108px "Debolsillo Cover"'),
+  ]);
   fontNote.hidden = state.edition !== "alianza" || coverFontReady();
   redraw();
 });
