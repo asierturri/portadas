@@ -1,4 +1,4 @@
-import { mountBook } from "./book.js?v=book-cover-fade-46";
+import { mountBook } from "./book.js?v=book-page-spread-53";
 import {
   drawTemplateBack,
   drawTemplateFront,

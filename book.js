@@ -254,8 +254,12 @@ function createWearTexture(THREE, { mode = "edges", seed = 1 } = {}) {
   return texture;
 }
 
-function setCurvedGeometry(deformation, age) {
-  const { geometry, basePositions, depth, maxBulge, hingeEdgeX, hingeWidth } = deformation;
+function setCurvedGeometry(deformation, age, openingAngle = 0) {
+  const {
+    geometry, basePositions, depth, maxBulge,
+    hingeEdgeX, hingeWidth, oppositeEdgeX, oppositeEdgeWidth, oppositeEdgeFactor = 0.6,
+    pageSpineEdgeX, pageSpreadWidth, pageBlockDepth,
+  } = deformation;
   const positions = geometry.attributes.position;
   const bulge = maxBulge * age;
   for (let i = 0; i < positions.count; i++) {
@@ -269,7 +273,26 @@ function setCurvedGeometry(deformation, age) {
       const acrossHinge = clamp((x - hingeEdgeX) / hingeWidth, 0, 1);
       hingeWeight = 1 - acrossHinge * acrossHinge * (3 - 2 * acrossHinge);
     }
-    positions.setXYZ(i, x + bulge * curve * hingeWeight, basePositions[offset + 1], z);
+    let oppositeEdgeWeight = 0;
+    if (oppositeEdgeWidth > 0) {
+      const acrossOppositeEdge = clamp((oppositeEdgeX - x) / oppositeEdgeWidth, 0, 1);
+      oppositeEdgeWeight = (1 - acrossOppositeEdge * acrossOppositeEdge * (3 - 2 * acrossOppositeEdge))
+        * oppositeEdgeFactor;
+    }
+    // Fan every page out proportionally across the block's actual thickness.
+    // Translating each half by its sign would stretch only the center strip.
+    let spreadZ = z;
+    if (pageSpreadWidth > 0 && openingAngle > 0) {
+      const fromSpine = clamp((x - pageSpineEdgeX) / pageSpreadWidth, 0, 1) * pageSpreadWidth;
+      const acrossPages = clamp(z / (pageBlockDepth / 2), -1, 1);
+      spreadZ += acrossPages * fromSpine * Math.sin(openingAngle);
+    }
+    positions.setXYZ(
+      i,
+      x + bulge * curve * (hingeWeight + oppositeEdgeWeight),
+      basePositions[offset + 1],
+      spreadZ,
+    );
   }
   positions.needsUpdate = true;
   geometry.computeVertexNormals();
@@ -292,41 +315,13 @@ async function loadWearTextures(THREE, anisotropy) {
   return { back, front, spine };
 }
 
-function createSpineWearMap(THREE, source, targetAspect, anisotropy) {
-  const sourceWidth = source.naturalWidth || source.width;
-  const sourceHeight = source.naturalHeight || source.height;
-  const targetWidth = Math.max(1, Math.round(sourceHeight * targetAspect));
-  const fixedCenterStart = Math.round(sourceWidth * 0.2);
-  const fixedCenterEnd = Math.round(sourceWidth * 0.8);
-  const fixedCenterWidth = fixedCenterEnd - fixedCenterStart;
-  const canvas = document.createElement("canvas");
-  canvas.width = targetWidth;
-  canvas.height = sourceHeight;
-  const context = canvas.getContext("2d");
-
-  if (targetWidth < fixedCenterWidth) {
-    const crop = (sourceWidth - targetWidth) / 2;
-    context.drawImage(source, crop, 0, targetWidth, sourceHeight, 0, 0, targetWidth, sourceHeight);
-  } else {
-    const sideWidth = (targetWidth - fixedCenterWidth) / 2;
-    context.drawImage(source, 0, 0, fixedCenterStart, sourceHeight, 0, 0, sideWidth, sourceHeight);
-    context.drawImage(
-      source,
-      fixedCenterStart, 0, fixedCenterWidth, sourceHeight,
-      sideWidth, 0, fixedCenterWidth, sourceHeight
-    );
-    context.drawImage(
-      source,
-      fixedCenterEnd, 0, sourceWidth - fixedCenterEnd, sourceHeight,
-      sideWidth + fixedCenterWidth, 0, sideWidth, sourceHeight
-    );
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
+function createSpineWearMap(THREE, source, anisotropy) {
+  const texture = new THREE.Texture(source);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = anisotropy;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
   return texture;
 }
 
@@ -713,6 +708,9 @@ export async function mountBook({
   let backMesh = null;
   let currentWear = 0;
   let spineDeformations = [];
+  let frontCoverParts = [];
+  let backCoverParts = [];
+  let coverHingeX = 0;
   const pointer = new THREE.Vector2();
   const raycaster = new THREE.Raycaster();
   let pickMesh = null;
@@ -798,7 +796,8 @@ export async function mountBook({
     currentWear = clamp(Number(value) || 0, 0, 100) / 100;
     const edgeWear = Math.pow(currentWear, 0.76);
     wearFadeUniform.value = Math.pow(currentWear, 2.2) * 0.86;
-    const yellowing = Math.pow(currentWear, 0.85) * 0.76;
+    const yellowingProgress = Math.pow(currentWear, 0.85);
+    const yellowing = yellowingProgress * 0.76;
     const pageColor = new THREE.Color(0xf4efe4).lerp(new THREE.Color(0xc49b50), yellowing);
     foreMat.color.copy(pageColor);
     topMat.color.copy(pageColor);
@@ -807,7 +806,33 @@ export async function mountBook({
     backWearMaterial.opacity = edgeWear * 0.92;
     spineWearMaterial.opacity = Math.pow(clamp((currentWear - 0.16) / 0.84, 0, 1), 1.12) * 0.88;
     const curveAge = Math.pow(clamp((currentWear - 0.05) / 0.95, 0, 1), 1.35);
-    for (const deformation of spineDeformations) setCurvedGeometry(deformation, curveAge);
+    const coverOpenAngle = yellowingProgress * THREE.MathUtils.degToRad(0.8);
+    for (const deformation of spineDeformations) {
+      setCurvedGeometry(deformation, curveAge, coverOpenAngle);
+    }
+    setCoverOpening(frontCoverParts, -coverOpenAngle);
+    setCoverOpening(backCoverParts, coverOpenAngle);
+  }
+
+  function registerCoverPart(parts, mesh, hingeZ) {
+    parts.push({
+      mesh,
+      basePosition: mesh.position.clone(),
+      baseRotationY: mesh.rotation.y,
+      hingeZ,
+    });
+  }
+
+  function setCoverOpening(parts, angle) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    for (const part of parts) {
+      const dx = part.basePosition.x - coverHingeX;
+      const dz = part.basePosition.z - part.hingeZ;
+      part.mesh.position.x = coverHingeX + cos * dx + sin * dz;
+      part.mesh.position.z = part.hingeZ - sin * dx + cos * dz;
+      part.mesh.rotation.y = part.baseRotationY + angle;
+    }
   }
 
   function applyMappedFinish(materialTarget, finishMap, finishConfig) {
@@ -935,6 +960,9 @@ export async function mountBook({
     const width = size.w * MM;
     const height = size.h * MM;
     const depth = pageMm * MM;
+    coverHingeX = -width / 2;
+    frontCoverParts = [];
+    backCoverParts = [];
     const board = 0.35 * MM;
     // Keep only a hairline of the printed spine artwork at the outside edge.
     // The remaining original spine width is a plain white core behind it.
@@ -970,9 +998,11 @@ export async function mountBook({
     );
     front.position.x = coverShiftX;
     front.position.z = depth / 2 + board / 2 + gap;
+    registerCoverPart(frontCoverParts, front, front.position.z);
     book.add(front);
     const frontWear = new THREE.Mesh(new THREE.PlaneGeometry(coverWidth, height), frontWearMaterial);
     frontWear.position.set(coverShiftX, 0, front.position.z + board / 2 + 0.00002);
+    registerCoverPart(frontCoverParts, frontWear, front.position.z);
     book.add(frontWear);
 
     const back = new THREE.Mesh(
@@ -981,27 +1011,38 @@ export async function mountBook({
     );
     back.position.x = coverShiftX;
     back.position.z = -(depth / 2 + board / 2 + gap);
+    registerCoverPart(backCoverParts, back, back.position.z);
     book.add(back);
     backMesh = back;
     const backWear = new THREE.Mesh(new THREE.PlaneGeometry(coverWidth, height), backWearMaterial);
     backWear.position.set(coverShiftX, 0, back.position.z - board / 2 - 0.00002);
     backWear.rotation.y = Math.PI;
+    registerCoverPart(backCoverParts, backWear, back.position.z);
     book.add(backWear);
 
     const spineDepth = depth + board * 2 + gap * 2;
+    // Keep very thick books from bending the page block so far that its top
+    // and bottom faces intersect the spine. Thin books retain the original curve.
+    const maxSpineBulge = Math.min(spineDepth * 0.09, width * 0.045);
     const spineCoreDepth = Math.max(0, spineDepth - board * 2);
     const spineOuterX = -width / 2 - board;
     const previousSpineWearMap = spineWearMaterial.map;
-    spineWearMaterial.map = createSpineWearMap(THREE, spineWearSource, spineDepth / height, surfaceAnisotropy);
+    spineWearMaterial.map = createSpineWearMap(THREE, spineWearSource, surfaceAnisotropy);
     spineWearMaterial.needsUpdate = true;
     previousSpineWearMap?.dispose();
     spineDeformations.push({
       geometry: pagesMesh.geometry,
       basePositions: pagesMesh.geometry.attributes.position.array.slice(),
       depth: spineDepth,
-      maxBulge: spineDepth * 0.09,
+      maxBulge: maxSpineBulge,
       hingeEdgeX: -width / 2,
       hingeWidth: Math.max(board * 12, width * 0.045),
+      oppositeEdgeX: width / 2,
+      oppositeEdgeWidth: Math.max(board * 12, width * 0.045),
+      oppositeEdgeFactor: 0.6,
+      pageSpineEdgeX: -width / 2,
+      pageSpreadWidth: width,
+      pageBlockDepth: depth,
     });
     const spineCore = new THREE.Mesh(
       new THREE.BoxGeometry(spineCoreWidth, height, spineCoreDepth, 1, 12, 48),
@@ -1013,7 +1054,7 @@ export async function mountBook({
       geometry: spineCore.geometry,
       basePositions: spineCore.geometry.attributes.position.array.slice(),
       depth: spineDepth,
-      maxBulge: spineDepth * 0.09,
+      maxBulge: maxSpineBulge,
     });
 
     const spine = new THREE.Mesh(
@@ -1026,7 +1067,7 @@ export async function mountBook({
       geometry: spine.geometry,
       basePositions: spine.geometry.attributes.position.array.slice(),
       depth: spineDepth,
-      maxBulge: spineDepth * 0.09,
+      maxBulge: maxSpineBulge,
     });
 
     const spineWearGeometry = new THREE.PlaneGeometry(spineDepth, height, 64, 12);
@@ -1038,7 +1079,7 @@ export async function mountBook({
       geometry: spineWearGeometry,
       basePositions: spineWearGeometry.attributes.position.array.slice(),
       depth: spineDepth,
-      maxBulge: spineDepth * 0.09,
+      maxBulge: maxSpineBulge,
     });
 
     pickMesh = new THREE.Mesh(
@@ -1046,6 +1087,7 @@ export async function mountBook({
       new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
     );
     pickMesh.position.z = front.position.z + board / 2 + 0.001;
+    registerCoverPart(frontCoverParts, pickMesh, front.position.z);
     book.add(pickMesh);
 
     built = { edition, pages, width, height, depth: depth + board * 2 };
