@@ -73,8 +73,6 @@ const panXInput = document.querySelector("#pan-x");
 const panYInput = document.querySelector("#pan-y");
 const pagesInput = document.querySelector("#pages");
 const pagesSlider = document.querySelector("#pages-slider");
-const pages3dSlider = document.querySelector("#pages-3d-slider");
-const pages3dValue = document.querySelector("#pages-3d-value");
 const backQuoteInput = document.querySelector("#back-quote");
 const backCopyInput = document.querySelector("#back-copy");
 const templateBackQuoteInput = document.querySelector("#template-back-quote");
@@ -942,8 +940,6 @@ authorInput.value = state.author;
 titleInput.value = state.title;
 pagesInput.value = String(state.pages);
 pagesSlider.value = String(state.pages);
-pages3dSlider.value = String(state.pages);
-pages3dValue.value = String(state.pages);
 state.wear = clamp(Math.round(Number(state.wear) || 0), 0, 100);
 wearSlider.value = String(state.wear);
 wearValue.value = `${state.wear}%`;
@@ -1109,8 +1105,6 @@ document.querySelectorAll(".edition[data-edition]").forEach((button) => {
     titleInput.value = state.title;
     pagesInput.value = String(state.pages);
     pagesSlider.value = String(state.pages);
-    pages3dSlider.value = String(state.pages);
-    pages3dValue.value = String(state.pages);
     wearSlider.value = String(state.wear);
     wearValue.value = `${state.wear}%`;
     viewer?.setWear(state.wear);
@@ -1443,6 +1437,101 @@ canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
 
 const editCoverButton = document.querySelector("#edit-cover");
+const editorPanel = document.querySelector(".panel");
+const editionMenu = document.querySelector("#edition-menu");
+const openEditorButton = document.querySelector("#open-editor");
+const openSettingsButton = document.querySelector("#open-settings");
+const mobileLayout = window.matchMedia("(max-width: 760px)");
+function syncSurfaceHeight() {
+  if (surfacePreview.hidden) return;
+  const style = getComputedStyle(surfacePreview);
+  const stage = surfacePreview.closest(".stage");
+  const availableHeight = mobileLayout.matches
+    ? window.innerHeight - 196
+    : stage.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  let availableWidth = surfacePreview.clientWidth;
+  if (!mobileLayout.matches) {
+    const gap = parseFloat(getComputedStyle(stage).columnGap);
+    const panelWidth = Math.min(500, window.innerWidth * 0.38);
+    availableWidth = Math.max(160, stage.clientWidth - panelWidth - gap);
+    const previewWidth = Math.min(availableHeight * canvas.width / canvas.height, availableWidth);
+    stage.style.setProperty("--preview-width", `${previewWidth}px`);
+  }
+  const height = Math.min(availableWidth * canvas.height / canvas.width, availableHeight);
+  surfacePreview.style.setProperty("--surface-height", `${Math.max(1, height)}px`);
+}
+new ResizeObserver(syncSurfaceHeight).observe(surfacePreview);
+new MutationObserver(syncSurfaceHeight).observe(canvas, { attributes: true, attributeFilter: ["width", "height"] });
+window.addEventListener("resize", syncSurfaceHeight);
+const skyboxPicker = document.querySelector("#skybox-picker");
+const advancedOptions = document.createElement("details");
+advancedOptions.className = "advanced-options";
+const advancedSummary = document.createElement("summary");
+advancedSummary.textContent = "More options";
+advancedOptions.append(advancedSummary);
+for (const element of [
+  document.querySelector("#template-options"),
+  document.querySelector("#template-back-options"),
+  document.querySelector("#debolsillo-options"),
+  document.querySelector("#penguin-options"),
+  panXInput.closest("label"), panYInput.closest("label"),
+  document.querySelector("#reset"), document.querySelector("#font-note"),
+]) advancedOptions.append(element);
+document.querySelector("#form").append(advancedOptions);
+// Keep the original controls and listeners when moving them between layouts.
+view.append(document.querySelector("#skybox-attribution"));
+
+function setEditorOpen(on, restoreFocus = true) {
+  document.body.classList.toggle("editor-open", on);
+  openEditorButton.setAttribute("aria-expanded", String(on));
+  openEditorButton.textContent = on ? "Preview" : "Edit";
+  if (mobileLayout.matches) {
+    editorPanel.inert = !on;
+    if (on) editionMenu.focus();
+    else if (restoreFocus) openEditorButton.focus();
+  }
+}
+
+function setSettingsOpen(on, restoreFocus = true) {
+  document.body.classList.toggle("settings-open", on);
+  openSettingsButton.setAttribute("aria-expanded", String(on));
+  if (mobileLayout.matches) {
+    skyboxPicker.inert = !on;
+    if (on) skyboxSelect.focus();
+    else if (restoreFocus) openSettingsButton.focus();
+  }
+}
+
+function syncResponsiveLayout() {
+  editorPanel.insertBefore(editionButtons, editionMenu.nextSibling);
+  editorPanel.inert = mobileLayout.matches && !document.body.classList.contains("editor-open");
+  skyboxPicker.inert = mobileLayout.matches && !document.body.classList.contains("settings-open");
+}
+function syncEditionMenu() {
+  editionMenu.textContent = `+ ${editionById.get(state.edition)?.name || "Editorial"}`;
+}
+editionButtons.addEventListener("click", (event) => {
+  if (!event.target.closest("[data-edition]")) return;
+  syncEditionMenu();
+  editorPanel.classList.remove("editions-open");
+  editionMenu.setAttribute("aria-expanded", "false");
+});
+editionMenu.addEventListener("click", () => {
+  const on = editorPanel.classList.toggle("editions-open");
+  editionMenu.setAttribute("aria-expanded", String(on));
+});
+openEditorButton.addEventListener("click", () => setEditorOpen(!document.body.classList.contains("editor-open")));
+document.querySelector("#close-editor").addEventListener("click", () => setEditorOpen(false));
+openSettingsButton.addEventListener("click", () => setSettingsOpen(true));
+document.querySelector("#close-settings").addEventListener("click", () => setSettingsOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (document.body.classList.contains("settings-open")) setSettingsOpen(false);
+  else if (document.body.classList.contains("editor-open")) setEditorOpen(false);
+});
+mobileLayout.addEventListener("change", syncResponsiveLayout);
+syncEditionMenu();
+syncResponsiveLayout();
 let selectedSurface = "front";
 
 function selectSurface(surface) {
@@ -1464,12 +1553,15 @@ previewSwitcher.addEventListener("click", (event) => {
 });
 
 function setPreview(on) {
+  setEditorOpen(false, false);
+  setSettingsOpen(false, false);
   previewing = on;
   document.body.classList.toggle("is-preview", on);
   surfacePreview.hidden = on;
   view.hidden = !on;
   editCoverButton.hidden = !on;
   previewButton.setAttribute("aria-pressed", String(on));
+  editCoverButton.textContent = mobileLayout.matches ? "Exit 3D view" : "Edit Cover";
   document.querySelector(".hint").textContent = editionHint();
   if (!on) return;
   syncBook();
@@ -1486,8 +1578,6 @@ function commitPages(force) {
   state.pages = clamp(Math.round(value), 32, 1200);
   pagesInput.value = String(state.pages);
   pagesSlider.value = String(state.pages);
-  pages3dSlider.value = String(state.pages);
-  pages3dValue.value = String(state.pages);
   caption.textContent = editionCaption();
   redraw();
 }
@@ -1496,10 +1586,6 @@ pagesInput.addEventListener("input", () => commitPages(false));
 pagesInput.addEventListener("change", () => commitPages(true));
 pagesSlider.addEventListener("input", () => {
   pagesInput.value = pagesSlider.value;
-  commitPages(false);
-});
-pages3dSlider.addEventListener("input", () => {
-  pagesInput.value = pages3dSlider.value;
   commitPages(false);
 });
 
@@ -1555,8 +1641,6 @@ document.querySelector("#reset-book").addEventListener("click", () => {
   titleInput.value = state.title;
   pagesInput.value = String(state.pages);
   pagesSlider.value = String(state.pages);
-  pages3dSlider.value = String(state.pages);
-  pages3dValue.value = String(state.pages);
   wearSlider.value = "0";
   wearValue.value = "0%";
   woodTableToggle.checked = state.woodTable;
